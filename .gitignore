@@ -1,0 +1,16 @@
+.DS_Store
+*.zip
+*.log
+.env
+.env.*
+node_modules/
+dist/
+tmp/
+*-ADMIN-MAPPING.json
+*-work-order.csv
+*work-order.tsv
+*anonymous-review.json
+*-completed-work-order.csv
+*-mos-summary.csv
+*-elo-summary.csv
+*-restored-aggregate-report.json

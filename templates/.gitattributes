@@ -1,0 +1,2 @@
+# Preserve the downloadable CSV fixture byte-for-byte (UTF-8 BOM + CRLF).
+*.csv -text -diff

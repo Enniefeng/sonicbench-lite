@@ -1,0 +1,28 @@
+﻿case_id,tag,lyrics,model_1_url,model_2_url,model_3_url,model_4_url,model_5_url,model_6_url
+CASE-0001,温暖 R&B，男声，92 BPM，雨夜氛围,"[主歌]
+夜色落在玻璃窗，雨声把街灯慢慢拉长
+我把未寄出的信，藏进外套最深的地方
+
+[副歌]
+如果明天还会下雨，请替我留一盏微光
+等城市安静以后，我会循着回忆的方向",https://example.com/audio/case-0001/a01.mp3,https://example.com/audio/case-0001/b02.mp3,https://example.com/audio/case-0001/c03.mp3,https://example.com/audio/case-0001/d04.mp3,https://example.com/audio/case-0001/e05.mp3,https://example.com/audio/case-0001/f06.mp3
+CASE-0002,Afrobeat，女声，法语，明亮夏日,"Sous le soleil, je retrouve le rythme de nos pas
+La ville danse, légère, au bord de l'océan",https://example.com/audio/case-0002/a01.mp3,https://example.com/audio/case-0002/b02.mp3,https://example.com/audio/case-0002/c03.mp3,https://example.com/audio/case-0002/d04.mp3,https://example.com/audio/case-0002/e05.mp3,https://example.com/audio/case-0002/f06.mp3
+CASE-0003,电影配乐，弦乐与铜管，渐进式高潮，无人声,,https://example.com/audio/case-0003/a01.mp3,https://example.com/audio/case-0003/b02.mp3,https://example.com/audio/case-0003/c03.mp3,https://example.com/audio/case-0003/d04.mp3,https://example.com/audio/case-0003/e05.mp3,https://example.com/audio/case-0003/f06.mp3
+CASE-0004,City Pop，日语女声，118 BPM，复古都市夜景,"ネオンの海を抜けて　君の声を探す
+午前零時の風が　昨日を連れ去ってゆく",https://example.com/audio/case-0004/a01.mp3,https://example.com/audio/case-0004/b02.mp3,https://example.com/audio/case-0004/c03.mp3,https://example.com/audio/case-0004/d04.mp3,https://example.com/audio/case-0004/e05.mp3,https://example.com/audio/case-0004/f06.mp3
+CASE-0005,Reggaeton，西班牙语男女对唱，105 BPM，热烈派对,"Dime, ""¿bailamos otra vez?""
+La noche está encendida y no quiere terminar",https://example.com/audio/case-0005/a01.mp3,https://example.com/audio/case-0005/b02.mp3,https://example.com/audio/case-0005/c03.mp3,https://example.com/audio/case-0005/d04.mp3,https://example.com/audio/case-0005/e05.mp3,https://example.com/audio/case-0005/f06.mp3
+CASE-0006,Indie Folk，英语女声，原声吉他，亲密叙事,"I kept your postcard by the kitchen light
+A little faded, but the words still feel alive",https://example.com/audio/case-0006/a01.mp3,https://example.com/audio/case-0006/b02.mp3,https://example.com/audio/case-0006/c03.mp3,https://example.com/audio/case-0006/d04.mp3,https://example.com/audio/case-0006/e05.mp3,https://example.com/audio/case-0006/f06.mp3
+CASE-0007,Synth Pop，韩语男声，124 BPM，未来感,"빛나는 도시 끝에서 너를 다시 불러
+멈춘 시간 사이로 우리의 밤이 흐른다",https://example.com/audio/case-0007/a01.mp3,https://example.com/audio/case-0007/b02.mp3,https://example.com/audio/case-0007/c03.mp3,https://example.com/audio/case-0007/d04.mp3,https://example.com/audio/case-0007/e05.mp3,https://example.com/audio/case-0007/f06.mp3
+CASE-0008,Ambient World，阿拉伯乌德琴与手碟，冥想，无人声,,https://example.com/audio/case-0008/a01.mp3,https://example.com/audio/case-0008/b02.mp3,https://example.com/audio/case-0008/c03.mp3,https://example.com/audio/case-0008/d04.mp3,https://example.com/audio/case-0008/e05.mp3,https://example.com/audio/case-0008/f06.mp3
+CASE-0009,Bossa Nova，葡萄牙语女声，轻柔海边午后,"Na janela, o mar desenha outra canção
+Cada onda leva um pouco do meu coração",https://example.com/audio/case-0009/a01.mp3,https://example.com/audio/case-0009/b02.mp3,https://example.com/audio/case-0009/c03.mp3,https://example.com/audio/case-0009/d04.mp3,https://example.com/audio/case-0009/e05.mp3,https://example.com/audio/case-0009/f06.mp3
+CASE-0010,华语摇滚，男女合唱，136 BPM，公路与自由,"[主歌]
+把旧地图折进口袋，迎着风穿过边界
+
+[副歌]
+让所有沉默都变成呼喊
+我们在天亮之前并肩向前",https://example.com/audio/case-0010/a01.mp3,https://example.com/audio/case-0010/b02.mp3,https://example.com/audio/case-0010/c03.mp3,https://example.com/audio/case-0010/d04.mp3,https://example.com/audio/case-0010/e05.mp3,https://example.com/audio/case-0010/f06.mp3
