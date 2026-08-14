@@ -1,14 +1,36 @@
-# SonicBench Lite｜2–6 模型动态评测任务卡
+# SonicBench Lite
 
-这是一个无需后端、无需安装依赖的纯前端 MVP，用来跑通“2–6 个模型结果脱敏 → 标注员逐 Case 评分 → 质检验收 → Mapping 还原 → MOS/ELO 计算”的闭环。
+SonicBench Lite 是一个在浏览器中运行的音乐生成模型盲评工具，支持在同一个评测批次中比较 **2–6 个模型结果**。它覆盖原始结果导入、随机脱敏、MOS 评分、ELO 两两对战、质检修订，以及管理员侧的 Mapping 还原和指标汇总。
 
-## 三个入口
+无需部署后端，也无需安装依赖。所有数据默认只在当前浏览器中处理。
 
-- `admin.html`：管理员导入 5–9 列原始 CSV（Case、Tag、Lyrics + 2–6 个 URL）。系统自动识别模型数、逐 Case 随机候选位置，并导出动态列工单与管理员 Mapping。
-- `index.html`：标注／质检任务台。标注模式粘贴单行动态工单；质检模式可直接粘贴新版自包含结果 JSON。
-- `aggregation.html`：管理员导入 Mapping JSON 与回收结果，按真实模型来源计算 MOS 均分和四维 ELO，并导出管理员敏感结果包。
+## 在线使用
 
-| 模型数 n | 原始 CSV 列数 | 脱敏工单列数 | MOS | ELO C(n,2) | 总子任务 |
+| 使用入口 | 适用角色 | 功能 |
+| --- | --- | --- |
+| [评测与质检工作台](https://enniefeng.github.io/sonicbench-lite/) | 评测员、质检员 | 导入单条脱敏工单，完成 MOS、ELO 评分或复核历史结果 |
+| [管理员工作台](https://enniefeng.github.io/sonicbench-lite/admin.html) | 评测管理员 | 导入原始 CSV，随机脱敏并导出评测工单和 Mapping |
+| [结果回算工作台](https://enniefeng.github.io/sonicbench-lite/aggregation.html) | 评测管理员 | 将回收结果映射回真实模型，计算 MOS 和 ELO |
+
+> 在线页面是纯静态应用。输入内容不会上传到 SonicBench Lite 的服务器，但音频播放仍会访问 URL 所在的音频服务器。
+
+## 工作流程
+
+```text
+管理员准备原始 CSV
+        ↓
+生成脱敏工单 CSV + 管理员 Mapping JSON
+        ↓
+评测员逐 Case 完成 MOS 与 ELO
+        ↓
+质检员载入结果、检查并按需修订
+        ↓
+管理员导入结果 + Mapping，生成真实模型指标
+```
+
+模型数量由系统自动识别。每个 Case 包含 `n` 个 MOS 任务和 `C(n,2)` 个 ELO 对战：
+
+| 模型数 | 原始 CSV 列数 | 脱敏工单列数 | MOS 任务 | ELO 对战 | 总任务数 |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 2 | 5 | 12 | 2 | 1 | 3 |
 | 3 | 6 | 14 | 3 | 3 | 6 |
@@ -16,47 +38,125 @@
 | 5 | 8 | 18 | 5 | 10 | 15 |
 | 6 | 9 | 20 | 6 | 15 | 21 |
 
-## 快速体验
+## 快速开始
 
-1. 打开 `admin.html`，选择 2–6 个模型并加载样例，或上传 CSV。
-2. 生成并下载脱敏工单 CSV 与 Mapping JSON。
-3. 复制一条脱敏任务行，打开 `index.html` 并粘贴。
-4. 完成 n 个 MOS 卡片，再完成 C(n,2) 个 ELO 对战。
-5. 在结果页复制 JSON、完整工单行或下载结果 CSV。
-6. 质检人员粘贴自包含 JSON 或带结果的完整工单，即可恢复历史评分与时间。
-7. 管理员在 `aggregation.html` 同时导入原 Mapping 与回收结果，完成来源还原和指标计算。
+### 1. 评测管理员：生成脱敏工单
 
-音频字段既支持纯 `https://...`，也支持常见的 Markdown 链接 `[https://...](https://...)`。系统会在校验和播放前自动拆除 Markdown 包装，并在 Mapping、脱敏工单和结果 JSON 中统一保存纯 URL。
+1. 下载并打开 [管理员 Excel 模板](templates/SonicBench-flexible-2-6-model-admin-import-template.xlsx)。
+2. 根据本次模型数量选择对应 Sheet，填写 Case 信息和 2–6 个模型的音频 URL。
+3. 将 Sheet 另存为 **CSV UTF-8（逗号分隔）**。
+4. 打开[管理员工作台](https://enniefeng.github.io/sonicbench-lite/admin.html)，上传 CSV 并执行校验。
+5. 生成后立即下载：
+   - **脱敏工单 CSV**：发送给评测员或质检员。
+   - **Mapping JSON**：只由管理员保存，不得发送给评测员。
 
-管理员 Excel 模板为 [`SonicBench-flexible-2-6-model-admin-import-template.xlsx`](templates/SonicBench-flexible-2-6-model-admin-import-template.xlsx)，其中包含 2/3/4/5/6 模型的 10 条示例 Sheet、空白模板和 CSV 导出说明。旧六模型模板和测试工单继续保留用于兼容回归。
+原始 CSV 的前三列固定为：
 
-## 兼容性
+```csv
+case_id,tag,lyrics,model_1_url,model_2_url,...,model_n_url
+```
 
-- 新生成工单使用 `sonicbench-work-order/flexible-model/1.0`。
-- 新结果使用 `sonicbench-annotation-result/flexible-model/1.0`，并显式保存 `model_count`。
-- 已有 4/5/6 模型空工单仍可载入；现行六模型 2.0 历史结果也可继续质检。早期 4/5 模型结果维度不同，不做有损自动转换。
-- 同一 Case 的 ELO 顺序和 A/B 左右位仍由无语义 `elo_order_key` 稳定派生；ELO 页面不显示 Blind ID。
+使用要求：
 
-详细字段约束见 [`DATA_CONTRACT.md`](DATA_CONTRACT.md)，分角色交付说明见 [`DELIVERY_AND_USER_GUIDE.md`](DELIVERY_AND_USER_GUIDE.md)。
+- 每个批次包含 2–6 个模型，并且所有 Case 的模型数量相同。
+- `case_id` 在批次内唯一。
+- URL 列必须从 `model_1_url` 开始连续填写，中间不能留空。
+- 同一模型列在整个批次中必须始终代表同一个真实模型。
+- URL 支持纯 `https://...`，也支持 `[音频链接](https://...)` 形式；导出时会统一转换为纯 URL。
+- 含逗号、双引号或换行的 Tag、Lyrics 应由 Excel 正常导出为带引号的 CSV 单元格。
+
+### 2. 评测员：完成一个 Case
+
+1. 打开[评测与质检工作台](https://enniefeng.github.io/sonicbench-lite/)，选择“标注模式”。
+2. 在 Excel 或 CSV 中复制一条完整的脱敏工单行，并粘贴到输入框。
+3. 完成所有候选音频的 MOS 评分。
+4. MOS 完成后，继续完成全部 ELO 两两对战。
+5. 在结果页复制结果 JSON、复制完整工单行，或下载结果 CSV。
+6. 点击“导入新 Case”继续下一条任务。
+
+MOS 当前包含音乐性、音质与声学表现、Vocals、指令遵循和总评：
+
+- 子维度评分不高于 3 分时，需要选择低分问题；选择“其他”时需填写备注。
+- 音乐性、音质与声学、Vocals 的整体分不高于 3 分时，需要填写备注。
+- 总评无论分数高低都需要填写备注。
+- 指令遵循低于 5 分时，需要选择扣分项并说明原因。
+
+每场 ELO 对战分别判断音乐性、音质与声学、Vocals 和总体，可选择 **A 胜、平局或 B 胜**。ELO 页面不会显示 Blind ID，避免评测员直接关联 MOS 阶段的候选身份。
+
+### 3. 质检员：恢复并复核结果
+
+质检支持两种输入方式：
+
+- 在“质检验收模式”中粘贴评测员导出的自包含结果 JSON。
+- 在“标注模式”中粘贴末列已包含结果的完整工单行，系统会自动识别历史结果。
+
+载入后可以逐项检查评分、备注和 ELO 判断，也可以查看原评测的完成时间、更新时间及 Revision。修改结果后，原 `completed_at` 会保留，`updated_at` 和 Revision 会更新。右下角可前往下一项或随时导出结果。
+
+### 4. 评测管理员：还原并计算指标
+
+1. 打开[结果回算工作台](https://enniefeng.github.io/sonicbench-lite/aggregation.html)。
+2. 导入生成工单时保存的同批次 Mapping JSON。
+3. 导入评测或质检回收的结果，支持结果 JSON、JSON 数组、JSONL，或带 `annotation_result_json` 列的 CSV。
+4. 执行“还原并计算结果”。
+5. 导出：
+   - 真实模型级 MOS 汇总 CSV；
+   - 四个维度的 ELO 汇总 CSV；
+   - 包含逐 Case 还原明细的完整 JSON。
+
+默认 ELO 初始分为 1500、K 值为 32、平局为 0.5。由于 ELO 具有顺序依赖性，正式批次应固定结果输入顺序和计算参数。
+
+## 数据与隐私
+
+- **Mapping JSON 是敏感文件**：它包含 Blind ID 与真实模型来源的对应关系，只能由管理员保存。
+- **聚合结果是敏感文件**：完整报告包含真实模型来源和源 URL，不应发给评测员或提交到公开仓库。
+- Blind ID 只能隐藏工具界面中的模型名称。URL 域名、文件路径、查询参数、音频 metadata 或封面仍可能暴露来源；严格盲评建议使用无语义代理 URL，并清理音频 metadata。
+- 浏览器草稿保存在当前设备的 `localStorage`。清理浏览器数据或更换设备后无法恢复，因此仍应及时导出结果文件。
+- 带签名的音频 URL 可能过期；请确保评测期间链接仍有效，并允许浏览器跨域读取音频 metadata。
+
+## 常见问题
+
+### 页面无法识别模型数量
+
+确认每行包含 2–6 个连续的模型 URL，且同一批次所有行的 URL 列数一致。合法脱敏工单列数为 12、14、16、18 或 20。
+
+### 音频无法播放或不显示时长
+
+- 先在新的浏览器标签页中直接打开该 URL，确认链接未过期且无需额外登录。
+- 确认链接是有效 HTTP(S) 音频地址，而不是音频介绍页。
+- 如果使用 Markdown 链接，请保持标准的 `[文字](https://地址)` 格式。
+- 部分音频服务会限制跨域请求或阻止浏览器读取 metadata；此时需要由文件服务调整 CORS，或改用可公开读取的代理 URL。
+
+### 提示结果指纹不一致
+
+粘贴的结果来自另一条 Case，或工单前置字段曾被修改。请根据 `case_id` 找回原始工单，只替换末列的 `annotation_result_json`。
+
+### Mapping 丢失
+
+Mapping 不会永久保存在网页中。如果生成后没有下载，只能使用原始 CSV 重新生成一批工单；重新生成的 Mapping 不能用于还原旧批次结果。
 
 ## 本地运行
 
-三个入口都是静态页面，可直接打开；若浏览器限制本地资源，可在目录中运行 `python3 -m http.server 8765`，再访问：
+下载仓库后，可以直接打开 HTML 文件。若浏览器限制本地文件访问，可在仓库目录运行：
+
+```bash
+python3 -m http.server 8765
+```
+
+然后访问：
 
 - `http://127.0.0.1:8765/admin.html`
 - `http://127.0.0.1:8765/index.html`
 - `http://127.0.0.1:8765/aggregation.html`
 
-仓库只包含虚构示例，不包含完整平台 PRD、组织权限设计或真实业务数据。提交前请阅读 [`SECURITY.md`](SECURITY.md) 和 [`PUBLIC_RELEASE_CHECKLIST.md`](PUBLIC_RELEASE_CHECKLIST.md)。
+推荐使用最新版 Chrome 或 Edge。
 
-## License
+## 更多文档
 
-当前未附开放源代码许可证，默认保留全部权利。若要允许外部复用、修改或分发，请由代码权利人审批并添加合适的 `LICENSE`。
+- [完整分角色使用手册](DELIVERY_AND_USER_GUIDE.md)
+- [数据格式与兼容规则](DATA_CONTRACT.md)
+- [安全说明](SECURITY.md)
+- [公开发布检查清单](PUBLIC_RELEASE_CHECKLIST.md)
 
-## MVP 边界
+## 许可说明
 
-- Mapping 只存在管理员端内存，生成后应立即下载并限制访问。
-- URL 域名、路径、查询参数、音频 metadata 或封面仍可能泄漏来源；正式评测应使用无语义代理 URL。
-- 草稿保存在当前浏览器 localStorage；CSV/Excel 工单仍是最终事实来源。
-- 回算页默认 ELO 参数为初始分 1500、K=32、平局 0.5，按“结果导入顺序 → 子任务顺序”更新；参数与顺序会写入导出报告。正式使用前应由评测负责人冻结版本。
-- 回算报告包含真实模型来源与源 URL，属于管理员敏感文件，不得发送给评测员或提交到公开仓库。
+本仓库当前尚未附带开源许可证，默认保留全部权利。在添加明确的 `LICENSE` 之前，公开可见不代表允许复制、修改、再发布或商业使用。
