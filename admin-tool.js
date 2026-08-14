@@ -211,7 +211,10 @@
       const caseId = String(row[0] || "").trim();
       const tag = String(row[1] || "");
       const lyrics = String(row[2] || "");
-      const urls = Array.from({ length: Math.min(Math.max(modelCount, MIN_MODEL_COUNT), MAX_MODEL_COUNT) }, (_, index) => String(row[index + 3] || "").trim());
+      const urls = Array.from(
+        { length: Math.min(Math.max(modelCount, MIN_MODEL_COUNT), MAX_MODEL_COUNT) },
+        (_, index) => U.normalizeHttpUrl(String(row[index + 3] || "").trim())
+      );
 
       if (!caseId) {
         errors.push({ line, field: "case_id", message: "Case ID 不能为空" });

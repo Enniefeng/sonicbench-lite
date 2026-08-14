@@ -72,7 +72,10 @@ function adminLine(modelCount) {
   const headers = ["case_id", "tag", "lyrics"]
     .concat(Array.from({ length: 6 }, (_, index) => `model_${index + 1}_url`));
   const row = ["CASE-DYNAMIC", "dynamic test", "line 1\nline 2"]
-    .concat(Array.from({ length: modelCount }, (_, index) => `https://example.com/${modelCount}/audio-${index + 1}.mp3`))
+    .concat(Array.from({ length: modelCount }, (_, index) => {
+      const url = `https://example.com/${modelCount}/audio-${index + 1}.mp3`;
+      return index === 0 ? `[${url}](${url})` : url;
+    }))
     .concat(Array.from({ length: 6 - modelCount }, () => ""));
   context.__ADMIN_TEST__.state.rawText = context.SB_UTILS.serializeCSV([headers, row]);
   context.__ADMIN_TEST__.generateWorkOrder();
@@ -82,6 +85,8 @@ function adminLine(modelCount) {
   assert.strictEqual(state.generatedRows.length, 1);
   assert.strictEqual(state.mapping.model_count, modelCount);
   assert.strictEqual(state.mapping.entries.length, modelCount);
+  assert(state.generatedRows[0].candidates.every((candidate) => /^https?:\/\//.test(candidate.url)), "admin must unwrap Markdown URLs");
+  assert(state.mapping.entries.every((entry) => !entry.source_url.startsWith("[")), "mapping must store canonical URLs");
   const csvRows = context.SB_UTILS.parseDelimitedDetailed(state.workOrderCsv).rows;
   assert.strictEqual(csvRows[0].length, 8 + modelCount * 2);
   assert.strictEqual(csvRows[1].length, 8 + modelCount * 2);
@@ -99,8 +104,13 @@ function testReviewer(line, modelCount) {
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
   assert(root.innerHTML.includes("3–21</b>"), "review import must keep the task range on one semantic value");
-  const parsed = api.parseWorkOrder(line);
+  const lineCells = context.SB_UTILS.parseDelimitedDetailed(line).rows[0];
+  const rawUrl = lineCells[7];
+  lineCells[7] = `[${rawUrl}](${rawUrl})`;
+  const parsed = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(lineCells));
   assert.deepStrictEqual(Array.from(parsed.errors), [], `${modelCount} model reviewer errors`);
+  assert.strictEqual(parsed.task.candidates[0].url, rawUrl, "reviewer must unwrap Markdown URLs before playback");
+  assert.strictEqual(context.SB_UTILS.decodeFlatText(parsed.task.cells[7]), rawUrl, "canonical work order must retain the raw URL");
   assert.strictEqual(parsed.task.modelCount, modelCount);
   assert.strictEqual(parsed.task.eloMatchCount, modelCount * (modelCount - 1) / 2);
   assert.strictEqual(parsed.task.totalSubtaskCount, modelCount * (modelCount + 1) / 2);
@@ -118,6 +128,7 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(quality.task.modelCount, modelCount);
   api.loadTask(parsed.task, null, { skipDraft: true });
   assert(root.innerHTML.includes(`${modelCount} 模型 · ${parsed.task.totalSubtaskCount} 子任务`));
+  assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);

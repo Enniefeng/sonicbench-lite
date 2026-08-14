@@ -26,6 +26,8 @@
 6. 质检人员粘贴自包含 JSON 或带结果的完整工单，即可恢复历史评分与时间。
 7. 管理员在 `aggregation.html` 同时导入原 Mapping 与回收结果，完成来源还原和指标计算。
 
+音频字段既支持纯 `https://...`，也支持常见的 Markdown 链接 `[https://...](https://...)`。系统会在校验和播放前自动拆除 Markdown 包装，并在 Mapping、脱敏工单和结果 JSON 中统一保存纯 URL。
+
 管理员 Excel 模板为 [`SonicBench-flexible-2-6-model-admin-import-template.xlsx`](templates/SonicBench-flexible-2-6-model-admin-import-template.xlsx)，其中包含 2/3/4/5/6 模型的 10 条示例 Sheet、空白模板和 CSV 导出说明。旧六模型模板和测试工单继续保留用于兼容回归。
 
 ## 兼容性
