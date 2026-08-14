@@ -922,7 +922,7 @@
         <span class="candidate-marker">${h(label)}</span>
         ${identity}
       </div>
-      <audio class="audio-player" controls preload="none" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
+      <audio class="audio-player" controls preload="metadata" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
     </article>`;
   }
 

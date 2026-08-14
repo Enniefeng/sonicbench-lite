@@ -128,6 +128,7 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(quality.task.modelCount, modelCount);
   api.loadTask(parsed.task, null, { skipDraft: true });
   assert(root.innerHTML.includes(`${modelCount} 模型 · ${parsed.task.totalSubtaskCount} 子任务`));
+  assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
