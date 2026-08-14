@@ -121,6 +121,16 @@
     });
   }
 
+  function normalizeWorkOrderUrls(cells, contract) {
+    const normalized = cells.slice();
+    for (let index = 0; index < contract.modelCount; index += 1) {
+      const urlIndex = 7 + index * 2;
+      const url = U.normalizeHttpUrl(displayCell(normalized[urlIndex]));
+      normalized[urlIndex] = U.encodeFlatText(U.protectSpreadsheetText(url));
+    }
+    return normalized;
+  }
+
   function displayCell(value) {
     return U.unprotectSpreadsheetText(U.decodeFlatText(String(value || "")));
   }
@@ -154,7 +164,7 @@
     const candidates = Array.from({ length: contract.modelCount }, (_, index) => ({
       slot: index + 1,
       id: displayCell(cells[6 + index * 2]).trim(),
-      url: displayCell(cells[7 + index * 2]).trim()
+      url: U.normalizeHttpUrl(displayCell(cells[7 + index * 2]))
     }));
     const task = {
       cells: cells.slice(),
@@ -351,7 +361,7 @@
     if (headerRow && (headerRow.length !== contract.columnCount || !arraysEqual(headerRow, contract.headers))) {
       return { errors: [`表头必须严格匹配标准 ${contract.columnCount} 列（${contract.modelCount} 模型）工单格式`] };
     }
-    dataRow = normalizeFlatCells(dataRow, contract.resultIndex);
+    dataRow = normalizeWorkOrderUrls(normalizeFlatCells(dataRow, contract.resultIndex), contract);
     const task = buildTask(dataRow);
     const errors = validateTask(task);
     let annotation = null;
@@ -411,7 +421,7 @@
     context.candidates.forEach((candidate) => cells.push(candidate && candidate.blind_id || "", candidate && candidate.url || ""));
     cells.push(context.elo_order_key || "", JSON.stringify(annotation));
     const contract = contractFromColumnCount(cells.length);
-    const normalized = normalizeFlatCells(cells, contract.resultIndex);
+    const normalized = normalizeWorkOrderUrls(normalizeFlatCells(cells, contract.resultIndex), contract);
     const task = buildTask(normalized);
     const errors = validateTask(task).concat(validateAnnotation(annotation, task));
     return { task, annotation, errors: [...new Set(errors)] };

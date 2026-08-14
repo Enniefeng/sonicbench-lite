@@ -151,9 +151,15 @@
     return ["case_id", "case id", "caseid", "id"].includes(first);
   }
 
+  function normalizeHttpUrl(value) {
+    const text = String(value || "").trim();
+    const markdownLink = text.match(/^\[[^\]\r\n]*\]\(\s*(https?:\/\/[^\r\n]+)\s*\)$/i);
+    return markdownLink ? markdownLink[1].trim() : text;
+  }
+
   function isHttpUrl(value) {
     try {
-      const parsed = new URL(String(value || "").trim());
+      const parsed = new URL(normalizeHttpUrl(value));
       return parsed.protocol === "http:" || parsed.protocol === "https:";
     } catch (error) {
       return false;
@@ -315,7 +321,7 @@
 
   function getUrlHost(url) {
     try {
-      return new URL(url).host;
+      return new URL(normalizeHttpUrl(url)).host;
     } catch (error) {
       return "无效 URL";
     }
@@ -334,6 +340,7 @@
       protectSpreadsheetText,
       unprotectSpreadsheetText,
       looksLikeHeader,
+      normalizeHttpUrl,
       isHttpUrl,
       secureShuffle,
       randomToken,

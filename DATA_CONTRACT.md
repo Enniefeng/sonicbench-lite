@@ -40,6 +40,8 @@
 
 总列数为 `8 + 2n`。初始导出时结果末列为空。管理员对每个 Case 独立安全洗牌；Blind ID 在批次内唯一；Mapping 单独导出且不得进入评测工单。
 
+原始模型 URL 与脱敏工单 URL 均接受纯 HTTP(S) 地址，或 Markdown 链接格式 `[显示文本](https://...)`。解析器必须先将 Markdown 链接规范化为括号内的纯 URL，再执行合法性校验、重复检测、脱敏导出、指纹计算与音频播放。规范化后的 Mapping、工单及结果 JSON 不保留 Markdown 包装。
+
 `elo_order_key` 是无语义随机 Token。评测端用 Key 和当前 n 个 Blind ID 稳定派生所有两两组合的出现顺序及 A/B 左右位；同一工单重载不得重新洗牌。ELO 页面不展示 Blind ID。
 
 ## 4. 结果 JSON
