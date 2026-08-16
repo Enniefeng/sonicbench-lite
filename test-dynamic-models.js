@@ -105,7 +105,7 @@ function testReviewer(line, modelCount) {
   const { context, root } = makeContext("review-app");
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
-    "initializeAudioPlayers", "autoPlayCurrentTask"
+    "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -136,7 +136,8 @@ function testReviewer(line, modelCount) {
   assert(root.innerHTML.includes(`${modelCount} 模型 · ${parsed.task.totalSubtaskCount} 子任务`));
   assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
   assert(root.innerHTML.includes("首音频自动播放"), "task header must expose the autoplay preference");
-  assert(root.innerHTML.includes("⌘/Ctrl"), "player hints must show the guarded shortcut modifier");
+  assert(!root.innerHTML.includes("播放器快捷键"), "reviewer must not expose playback shortcut hints");
+  assert(!root._listeners.keydown, "reviewer must not register global keyboard shortcuts");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
@@ -175,37 +176,6 @@ function testReviewer(line, modelCount) {
   nextAudio.paused = true;
   root._listeners.pause[0]({ target: nextAudio });
   assert.strictEqual(nextAudio.paused, true, "manual pause must remain paused without an auto-resume path");
-
-  const shortcutEvent = (code, target = { closest() { return null; } }, active = true) => ({
-    key: "",
-    code,
-    repeat: false,
-    isComposing: false,
-    metaKey: active,
-    ctrlKey: false,
-    shiftKey: active,
-    altKey: false,
-    prevented: false,
-    preventDefault() { this.prevented = true; },
-    target
-  });
-  api.state.currentIndex = modelCount;
-  nextAudio.paused = true;
-  const unguardedB = shortcutEvent("Digit2", undefined, false);
-  root._listeners.keydown[0](unguardedB);
-  assert.strictEqual(unguardedB.prevented, false, "unguarded number keys must remain available to the page");
-  assert.strictEqual(nextAudio.paused, true, "unguarded number keys must not control playback");
-  const noteTarget = { closest(selector) { return selector.includes("textarea") ? this : null; } };
-  const playB = shortcutEvent("Digit2", noteTarget);
-  root._listeners.keydown[0](playB);
-  assert.strictEqual(playB.prevented, true, "guarded ELO B shortcut must consume the key while editing a note");
-  assert.strictEqual(nextAudio.paused, false, "guarded ELO B shortcut must start candidate B from a note field");
-  const pauseRecent = shortcutEvent("Space", noteTarget);
-  root._listeners.keydown[0](pauseRecent);
-  assert.strictEqual(nextAudio.paused, true, "guarded Space must pause the most recently selected audio");
-  const seekRecent = shortcutEvent("Period", noteTarget);
-  root._listeners.keydown[0](seekRecent);
-  assert.strictEqual(nextAudio.currentTime, 6.5, "guarded period must seek the recent audio forward five seconds");
 
   nextAudio.currentTime = 38;
   root._listeners.pause[0]({ target: nextAudio });
@@ -259,6 +229,54 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(api.state.eloMatches[firstMatch.match_id].dimension_results.musicality, "left");
   api.loadTask(quality.task, quality.annotation, { skipDraft: true, workMode: "quality" });
   assert(root.innerHTML.includes("质检验收模式"));
+  assert(root.innerHTML.includes("本次修改明细"), "quality mode must expose a field-level change panel");
+  assert.strictEqual(JSON.stringify(api.createAnnotation()), JSON.stringify(quality.annotation), "unchanged quality review must preserve the original result");
+
+  const firstMosId = quality.task.candidates[0].id;
+  api.state.mos[firstMosId].scores.melody = 3;
+  api.state.mos[firstMosId].low_score_issues.melody = ["主旋律难以分辨"];
+  const firstChanges = api.collectChanges();
+  assert(firstChanges.some((change) => change.subtask_id === "MOS-01" && change.field_path === "scores.melody"), "quality audit must record a changed MOS score");
+  assert(firstChanges.some((change) => change.subtask_id === "MOS-01" && change.field_path === "low_score_issues.melody"), "quality audit must record changed low-score issues");
+  const revisionTwo = api.createAnnotation();
+  assert.strictEqual(revisionTwo.result_revision, 2, "first quality edit must create Revision 2");
+  assert.strictEqual(revisionTwo.revision_history.length, 2, "first quality edit must append, not replace, revision history");
+  assert.strictEqual(revisionTwo.revision_history[1].revision, 2);
+  assert.strictEqual(revisionTwo.revision_history[1].changes.length, firstChanges.length);
+  assert(revisionTwo.revision_remark.includes("MOS-01"), "revision remark must summarize the changed subtask");
+  assert.strictEqual(revisionTwo.completed_at, quality.annotation.completed_at, "quality revisions must preserve the original completion time");
+  assert.deepStrictEqual(Array.from(api.validateAnnotation(revisionTwo, quality.task)), []);
+
+  api.state.exportResult = revisionTwo;
+  api.adoptExportedRevision();
+  api.state.mos[firstMosId].notes.overall = "第二轮质检补充说明";
+  const secondChanges = api.collectChanges();
+  assert.strictEqual(secondChanges.length, 1, "a second quality round must compare against the newly adopted revision");
+  assert.strictEqual(secondChanges[0].field_path, "notes.overall");
+  const revisionThree = api.createAnnotation();
+  assert.strictEqual(revisionThree.result_revision, 3, "second quality edit must create Revision 3");
+  assert.strictEqual(revisionThree.revision_history.length, 3, "second quality edit must retain all earlier revision entries");
+  assert.strictEqual(revisionThree.revision_history[2].changes.length, 1, "latest revision must contain only its incremental change set");
+  assert.deepStrictEqual(Array.from(api.validateAnnotation(revisionThree, quality.task)), []);
+
+  if (modelCount === 2) {
+    const historylessAnnotation = JSON.parse(JSON.stringify(annotation));
+    delete historylessAnnotation.revision_remark;
+    delete historylessAnnotation.revision_history;
+    const historylessQuality = api.parseResultJson(JSON.stringify(historylessAnnotation));
+    assert.deepStrictEqual(Array.from(historylessQuality.errors), [], "historyless legacy results must remain loadable");
+    api.loadTask(historylessQuality.task, historylessQuality.annotation, { skipDraft: true, workMode: "quality" });
+    const legacyFirstId = historylessQuality.task.candidates[0].id;
+    api.state.mos[legacyFirstId].scores.melody = 3;
+    api.state.mos[legacyFirstId].low_score_issues.melody = ["主旋律难以分辨"];
+    const migratedRevision = api.createAnnotation();
+    assert.strictEqual(migratedRevision.result_revision, 2);
+    assert.strictEqual(migratedRevision.revision_history.length, 2, "first edit of a historyless result must backfill its original revision");
+    assert.strictEqual(migratedRevision.revision_history[0].changes.length, 0);
+    assert(migratedRevision.revision_history[0].remark.includes("此前未记录"));
+    assert(migratedRevision.revision_history[1].changes.length > 0);
+    assert.deepStrictEqual(Array.from(api.validateAnnotation(migratedRevision, historylessQuality.task)), []);
+  }
 
   if (modelCount === 6) {
     const cells = context.SB_UTILS.parseDelimitedDetailed(line).rows[0];
