@@ -56,8 +56,10 @@
 - `elo_matches`：恰好 C(n,2) 项，与 Key 派生顺序、左右位完全一致。
 - `completed_subtask_count` 与 `total_subtask_count`：均为 n(n+1)/2。
 - `started_at`、`completed_at`、`updated_at`、`result_revision`。
+- `revision_remark`：当前版本的简短修改摘要。
+- `revision_history`：按 Revision 递增的版本记录。每个条目包含 `revision`、`updated_at`、`remark` 和本轮增量 `changes`；每条 Change 记录子任务、字段路径、维度及修改前后值。
 
-结果回填只替换工单末列，不得改变前置匿名工单字段。质检未修改结果时应保持原结果字节稳定；修改时保留原 `completed_at`，更新 `updated_at`，并增加 Revision。
+结果回填只替换工单末列，不得改变前置匿名工单字段。质检未修改结果时应保持原结果字节稳定；修改时保留原 `completed_at`，更新 `updated_at`，增加 Revision，并向 `revision_history` 追加一条增量记录，不覆盖旧版本。历史结果没有 `revision_history` 时仍可载入；首次修订会为旧版本补一条“此前未记录字段级明细”的兼容记录。
 
 ## 5. 兼容策略
 
