@@ -26,6 +26,7 @@
   const LAST_DRAFT_KEY = "sonicbench-lite-review-last-draft/flexible-model/1.0";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
+  let lastActiveAudioKey = "";
 
   const state = {
     screen: "import",
@@ -95,6 +96,40 @@
       if (audio.readyState >= 1) restoreAudioPlayback(audio);
       else audio.addEventListener("loadedmetadata", () => restoreAudioPlayback(audio), { once: true });
     });
+  }
+
+  function currentAudioPlayers() {
+    return Array.from(root.querySelectorAll("audio.audio-player"));
+  }
+
+  function preferredAudioPlayer() {
+    const players = currentAudioPlayers();
+    return players.find((audio) => audioPlaybackKey(audio) === lastActiveAudioKey) || players[0] || null;
+  }
+
+  function toggleAudioPlayback(audio) {
+    if (!audio) return;
+    if (audio.paused) {
+      const playback = audio.play();
+      if (playback && typeof playback.catch === "function") {
+        playback.catch(() => toast("音频暂时无法播放，请检查链接是否有效", "error"));
+      }
+    } else {
+      audio.pause();
+      rememberAudioPlayback(audio);
+    }
+  }
+
+  function seekAudioPlayback(audio, deltaSeconds) {
+    if (!audio || !Number.isFinite(audio.currentTime)) return;
+    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Infinity;
+    audio.currentTime = Math.max(0, Math.min(duration, audio.currentTime + deltaSeconds));
+    rememberAudioPlayback(audio);
+  }
+
+  function isKeyboardInputTarget(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    return Boolean(target.closest("input, textarea, select, button, a, audio, [contenteditable='true']"));
   }
 
   function arraysEqual(a, b) {
@@ -573,6 +608,7 @@
     state.exportResult = null;
     state.restoredDraft = false;
     playbackMemory.clear();
+    lastActiveAudioKey = "";
 
     if (!annotation && !opts.skipDraft) {
       const draft = readStorage(draftKey(task));
@@ -978,7 +1014,7 @@
     </aside>`;
   }
 
-  function renderAudioCard(candidate, label, compact, hideIdentity = false) {
+  function renderAudioCard(candidate, label, compact, hideIdentity = false, shortcutKey = "Space") {
     const identity = hideIdentity
       ? `<div class="identity-veil">${icon("shield", 15)}<span><small>身份已隐藏</small><strong>仅以 A / B 完成本场判断</strong></span></div>`
       : `<div><small>匿名音频 ID</small><strong class="mono">${h(candidate.id)}</strong></div>
@@ -989,6 +1025,10 @@
         ${identity}
       </div>
       <audio class="audio-player" controls preload="metadata" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
+      <div class="playback-shortcuts" aria-label="播放器快捷键">
+        <span><kbd>${h(shortcutKey)}</kbd> 播放／暂停</span>
+        ${compact ? "" : `<span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span>`}
+      </div>
     </article>`;
   }
 
@@ -1036,7 +1076,7 @@
     const groups = MOS_GROUPS.map((group) => `<section class="mos-group tone-${h(group.tone || "default")}"><div class="mos-group-title"><span>${h(group.label)}</span><small>${group.subdimensions.length} 个子维度 + 1 个整体分</small></div>${group.subdimensions.map((dimension) => renderDimension(candidate.id, dimension, answer, { subdimension: true, groupKey: group.key })).join("")}${renderDimension(candidate.id, group.overall, answer, { overall: true })}</section>`).join("");
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">MOS · ${index + 1}/${state.task.modelCount}</span><h2 class="stage-title">为当前音频完成分层评分</h2></div><span class="stage-state ${mosComplete(candidate.id) ? "is-complete" : ""}">${mosComplete(candidate.id) ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`}</span></div>
-      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false))}
+      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false, "Space"))}
       <section class="rating-panel layered-rating"><div class="panel-heading"><strong>整体维度与子维度</strong><span>1 很差 · 3 合格 · 5 优秀</span></div>${groups}
         <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>扣分问题多选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
         <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span><small>所有分数均须备注</small></div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
@@ -1051,7 +1091,7 @@
     const answer = state.eloMatches[match.match_id];
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">ELO MATCH · ${matchIndex + 1}/${state.task.eloMatchCount}</span><h2 class="stage-title">从四个维度分别判断胜、平、负</h2></div><span class="stage-state ${eloMatchComplete(match.match_id) ? "is-complete" : ""}">${eloMatchComplete(match.match_id) ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`}</span></div>
-      ${renderStickyContext(`<div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true)}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true)}</div>`)}
+      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true, "A")}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true, "B")}</div><div class="comparison-shortcuts"><span><kbd>Space</kbd> 最近音频播放／暂停</span><span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span></div></div>`)}
       <section class="rating-panel elo-rating">
         <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
         <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
@@ -1305,6 +1345,7 @@
     state.sourceAnnotation = null;
     state.railScrollTop = 0;
     playbackMemory.clear();
+    lastActiveAudioKey = "";
     if (draftSaveTimer != null) {
       window.clearTimeout(draftSaveTimer);
       draftSaveTimer = null;
@@ -1339,6 +1380,7 @@
         rememberAudioPlayback(audio);
       }
     });
+    lastActiveAudioKey = audioPlaybackKey(event.target);
     rememberAudioPlayback(event.target);
   }, true);
 
@@ -1351,6 +1393,43 @@
   root.addEventListener("ended", (event) => {
     if (event.target && event.target.tagName === "AUDIO") rememberAudioPlayback(event.target, { reset: true });
   }, true);
+
+  root.addEventListener("keydown", (event) => {
+    if (state.screen !== "task" || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isKeyboardInputTarget(event.target)) return;
+    const players = currentAudioPlayers();
+    if (!players.length) return;
+    const eloStage = state.currentIndex >= state.task.modelCount;
+    const key = String(event.key || "").toLowerCase();
+    let audio = null;
+
+    if (eloStage && (key === "a" || key === "b")) {
+      if (event.repeat) return;
+      audio = players[key === "a" ? 0 : 1] || null;
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      toggleAudioPlayback(audio);
+      return;
+    }
+
+    if (key === " " || event.code === "Space") {
+      if (event.repeat) return;
+      audio = preferredAudioPlayer();
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      toggleAudioPlayback(audio);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      audio = preferredAudioPlayer();
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      seekAudioPlayback(audio, event.key === "ArrowLeft" ? -5 : 5);
+    }
+  });
 
   root.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
