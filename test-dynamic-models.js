@@ -8,10 +8,15 @@ const vm = require("vm");
 const base = __dirname;
 
 function fakeRoot() {
+  const listeners = {};
   return {
     innerHTML: "",
     scrollTop: 0,
-    addEventListener() {},
+    _listeners: listeners,
+    addEventListener(name, handler) {
+      if (!listeners[name]) listeners[name] = [];
+      listeners[name].push(handler);
+    },
     querySelector() { return null; },
     querySelectorAll() { return []; }
   };
@@ -132,9 +137,56 @@ function testReviewer(line, modelCount) {
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
+
+  const initialAudio = {
+    tagName: "AUDIO",
+    currentSrc: parsed.task.candidates[0].url,
+    src: parsed.task.candidates[0].url,
+    currentTime: 4.25,
+    volume: 0.8,
+    paused: false,
+    pause() { this.paused = true; }
+  };
+  const nextAudio = {
+    tagName: "AUDIO",
+    currentSrc: parsed.task.candidates[1].url,
+    src: parsed.task.candidates[1].url,
+    currentTime: 1.5,
+    volume: 1,
+    paused: false,
+    pause() { this.paused = true; }
+  };
+  root.querySelectorAll = (selector) => selector === "audio" ? [initialAudio, nextAudio] : [];
+  root._listeners.play[0]({ target: nextAudio });
+  assert.strictEqual(initialAudio.paused, true, "starting B must pause A");
+  assert.strictEqual(initialAudio.currentTime, 4.25, "pausing A must preserve its playback position");
+  assert.strictEqual(nextAudio.paused, false, "starting B must not pause B itself");
+  nextAudio.paused = true;
+  root._listeners.pause[0]({ target: nextAudio });
+  assert.strictEqual(nextAudio.paused, true, "manual pause must remain paused without an auto-resume path");
+  root.querySelectorAll = () => [];
+
+  const mosHtmlBeforeClick = root.innerHTML;
+  const mosTarget = {
+    dataset: { action: "set-score", id: parsed.task.candidates[0].id, dimension: "melody", score: "4" },
+    closest(selector) { return selector === "[data-action]" ? this : null; }
+  };
+  root._listeners.click[0]({ target: mosTarget });
+  assert.strictEqual(root.innerHTML, mosHtmlBeforeClick, "MOS score clicks must not rebuild the audio workspace");
+  assert.strictEqual(api.state.mos[parsed.task.candidates[0].id].scores.melody, 4);
+
   api.state.currentIndex = modelCount;
   api.render();
   parsed.task.candidates.forEach((candidate) => assert(!root.innerHTML.includes(candidate.id), "ELO screen must hide Blind IDs"));
+  const eloHtmlBeforeClick = root.innerHTML;
+  const firstMatch = parsed.task.eloMatches[0];
+  const eloTarget = {
+    dataset: { action: "set-elo-outcome", match: firstMatch.match_id, dimension: "musicality", outcome: "left" },
+    closest(selector) { return selector === "[data-action]" ? this : null; }
+  };
+  root._listeners.click[0]({ target: eloTarget });
+  assert.strictEqual(root.innerHTML, eloHtmlBeforeClick, "ELO outcome clicks must not rebuild either audio player");
+  assert.strictEqual(api.state.eloMatches[firstMatch.match_id].dimension_results.musicality, "left");
   api.loadTask(quality.task, quality.annotation, { skipDraft: true, workMode: "quality" });
   assert(root.innerHTML.includes("质检验收模式"));
 
