@@ -138,6 +138,7 @@ function testReviewer(line, modelCount) {
   assert(root.innerHTML.includes("首音频自动播放"), "task header must expose the autoplay preference");
   assert(!root.innerHTML.includes("播放器快捷键"), "reviewer must not expose playback shortcut hints");
   assert(!root._listeners.keydown, "reviewer must not register global keyboard shortcuts");
+  assert(!root.innerHTML.includes("为当前音频完成分层评分"), "MOS cards must not repeat the large stage title");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
@@ -218,6 +219,8 @@ function testReviewer(line, modelCount) {
   api.state.currentIndex = modelCount;
   api.render();
   parsed.task.candidates.forEach((candidate) => assert(!root.innerHTML.includes(candidate.id), "ELO screen must hide Blind IDs"));
+  assert(!root.innerHTML.includes("从四个维度分别判断胜、平、负"), "ELO cards must not repeat the large stage title");
+  assert(!root.innerHTML.includes("每场对战独立播放"), "ELO cards must not repeat the playback reset notice");
   const eloHtmlBeforeClick = root.innerHTML;
   const firstMatch = parsed.task.eloMatches[0];
   const eloTarget = {
