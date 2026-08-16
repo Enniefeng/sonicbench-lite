@@ -24,6 +24,9 @@
   const SCORE_CAPTIONS = { 1: "很差", 2: "较差", 3: "合格", 4: "良好", 5: "优秀" };
   const STORAGE_PREFIX = "sonicbench-lite-review-draft/flexible-model/1.0/";
   const LAST_DRAFT_KEY = "sonicbench-lite-review-last-draft/flexible-model/1.0";
+  const playbackMemory = new Map();
+  let draftSaveTimer = null;
+  let lastActiveAudioKey = "";
 
   const state = {
     screen: "import",
@@ -46,6 +49,87 @@
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function audioPlaybackKey(audio) {
+    return audio ? audio.currentSrc || audio.src || "" : "";
+  }
+
+  function rememberAudioPlayback(audio, options = {}) {
+    const key = audioPlaybackKey(audio);
+    if (!key) return;
+    const current = playbackMemory.get(key) || { time: 0, volume: 1 };
+    const time = options.reset
+      ? 0
+      : Number.isFinite(audio.currentTime) && audio.currentTime >= 0
+        ? audio.currentTime
+        : current.time;
+    playbackMemory.set(key, {
+      time,
+      volume: Number.isFinite(audio.volume) ? audio.volume : current.volume
+    });
+  }
+
+  function rememberAllAudioPlayback() {
+    root.querySelectorAll("audio").forEach((audio) => rememberAudioPlayback(audio));
+  }
+
+  function restoreAudioPlayback(audio) {
+    const key = audioPlaybackKey(audio);
+    const saved = key ? playbackMemory.get(key) : null;
+    if (!saved) return;
+    try {
+      audio.volume = saved.volume;
+      const maxTime = Number.isFinite(audio.duration) && audio.duration > 0
+        ? Math.max(0, audio.duration - 0.05)
+        : saved.time;
+      audio.currentTime = Math.min(saved.time, maxTime);
+    } catch (error) {
+      /* Seeking can be rejected until metadata is available. */
+    }
+  }
+
+  function initializeAudioPlayers(scope = root) {
+    scope.querySelectorAll("audio").forEach((audio) => {
+      if (audio.dataset.playbackReady === "true") return;
+      audio.dataset.playbackReady = "true";
+      if (audio.readyState >= 1) restoreAudioPlayback(audio);
+      else audio.addEventListener("loadedmetadata", () => restoreAudioPlayback(audio), { once: true });
+    });
+  }
+
+  function currentAudioPlayers() {
+    return Array.from(root.querySelectorAll("audio.audio-player"));
+  }
+
+  function preferredAudioPlayer() {
+    const players = currentAudioPlayers();
+    return players.find((audio) => audioPlaybackKey(audio) === lastActiveAudioKey) || players[0] || null;
+  }
+
+  function toggleAudioPlayback(audio) {
+    if (!audio) return;
+    if (audio.paused) {
+      const playback = audio.play();
+      if (playback && typeof playback.catch === "function") {
+        playback.catch(() => toast("音频暂时无法播放，请检查链接是否有效", "error"));
+      }
+    } else {
+      audio.pause();
+      rememberAudioPlayback(audio);
+    }
+  }
+
+  function seekAudioPlayback(audio, deltaSeconds) {
+    if (!audio || !Number.isFinite(audio.currentTime)) return;
+    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Infinity;
+    audio.currentTime = Math.max(0, Math.min(duration, audio.currentTime + deltaSeconds));
+    rememberAudioPlayback(audio);
+  }
+
+  function isKeyboardInputTarget(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    return Boolean(target.closest("input, textarea, select, button, a, audio, [contenteditable='true']"));
   }
 
   function arraysEqual(a, b) {
@@ -475,6 +559,22 @@
     if (writeStorage(key, payload)) writeStorage(LAST_DRAFT_KEY, { key, updated_at: payload.updated_at });
   }
 
+  function scheduleDraftSave() {
+    if (draftSaveTimer != null) window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = window.setTimeout(() => {
+      draftSaveTimer = null;
+      saveDraft();
+    }, 160);
+  }
+
+  function flushDraftSave() {
+    if (draftSaveTimer != null) {
+      window.clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    saveDraft();
+  }
+
   function validDraft(draft, task) {
     if (!draft || draft.fingerprint !== task.fingerprint || !draft.mos || !draft.elo_matches) return false;
     const ids = task.candidates.map((candidate) => candidate.id);
@@ -507,6 +607,8 @@
     state.startedAt = annotation && annotation.started_at ? annotation.started_at : U.nowISO();
     state.exportResult = null;
     state.restoredDraft = false;
+    playbackMemory.clear();
+    lastActiveAudioKey = "";
 
     if (!annotation && !opts.skipDraft) {
       const draft = readStorage(draftKey(task));
@@ -912,7 +1014,7 @@
     </aside>`;
   }
 
-  function renderAudioCard(candidate, label, compact, hideIdentity = false) {
+  function renderAudioCard(candidate, label, compact, hideIdentity = false, shortcutKey = "Space") {
     const identity = hideIdentity
       ? `<div class="identity-veil">${icon("shield", 15)}<span><small>身份已隐藏</small><strong>仅以 A / B 完成本场判断</strong></span></div>`
       : `<div><small>匿名音频 ID</small><strong class="mono">${h(candidate.id)}</strong></div>
@@ -923,6 +1025,10 @@
         ${identity}
       </div>
       <audio class="audio-player" controls preload="metadata" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
+      <div class="playback-shortcuts" aria-label="播放器快捷键">
+        <span><kbd>${h(shortcutKey)}</kbd> 播放／暂停</span>
+        ${compact ? "" : `<span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span>`}
+      </div>
     </article>`;
   }
 
@@ -948,6 +1054,12 @@
     return `<div class="dimension-block ${config.overall ? "is-overall" : ""}"><div class="dimension-row"><div class="dimension-copy"><strong>${h(dimension.label)}</strong></div>${renderScoreScale(candidateId, dimension, answer)}</div>${config.subdimension && low ? renderIssueChips(candidateId, dimension, answer) : ""}${config.overall && low ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "整体维度低分备注", true) : ""}</div>`;
   }
 
+  function renderInstructionDeductions(candidateId, answer) {
+    const instructionScore = answer.scores[INSTRUCTION_DIMENSION.key];
+    if (!Number.isInteger(instructionScore) || instructionScore >= 5) return "";
+    return `<div class="issue-panel instruction-issues"><div class="issue-heading"><div><strong>指令扣分项</strong><small>必填 · 可多选</small></div><span>评分低于 5</span></div><div class="issue-chips">${INSTRUCTION_DEDUCTION_OPTIONS.map((option) => `<button type="button" class="issue-chip ${answer.instruction_deductions.includes(option) ? "is-selected" : ""}" data-action="toggle-deduction" data-id="${h(candidateId)}" data-issue="${h(option)}" aria-pressed="${answer.instruction_deductions.includes(option)}">${answer.instruction_deductions.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div><label class="dimension-note-field"><span>扣分原因备注 · 必填</span><textarea rows="2" data-role="instruction-note" data-id="${h(candidateId)}" placeholder="说明具体未遵循之处">${h(answer.instruction_note || "")}</textarea></label></div>`;
+  }
+
   function renderStickyContext(audioContent) {
     return `<section class="sticky-evaluation-context">
       ${audioContent}
@@ -962,13 +1074,11 @@
     const candidate = state.task.candidates[index];
     const answer = state.mos[candidate.id];
     const groups = MOS_GROUPS.map((group) => `<section class="mos-group tone-${h(group.tone || "default")}"><div class="mos-group-title"><span>${h(group.label)}</span><small>${group.subdimensions.length} 个子维度 + 1 个整体分</small></div>${group.subdimensions.map((dimension) => renderDimension(candidate.id, dimension, answer, { subdimension: true, groupKey: group.key })).join("")}${renderDimension(candidate.id, group.overall, answer, { overall: true })}</section>`).join("");
-    const instructionScore = answer.scores[INSTRUCTION_DIMENSION.key];
-    const deductionPanel = Number.isInteger(instructionScore) && instructionScore < 5 ? `<div class="issue-panel instruction-issues"><div class="issue-heading"><div><strong>指令扣分项</strong><small>必填 · 可多选</small></div><span>评分低于 5</span></div><div class="issue-chips">${INSTRUCTION_DEDUCTION_OPTIONS.map((option) => `<button type="button" class="issue-chip ${answer.instruction_deductions.includes(option) ? "is-selected" : ""}" data-action="toggle-deduction" data-id="${h(candidate.id)}" data-issue="${h(option)}" aria-pressed="${answer.instruction_deductions.includes(option)}">${answer.instruction_deductions.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div><label class="dimension-note-field"><span>扣分原因备注 · 必填</span><textarea rows="2" data-role="instruction-note" data-id="${h(candidate.id)}" placeholder="说明具体未遵循之处">${h(answer.instruction_note || "")}</textarea></label></div>` : "";
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">MOS · ${index + 1}/${state.task.modelCount}</span><h2 class="stage-title">为当前音频完成分层评分</h2></div><span class="stage-state ${mosComplete(candidate.id) ? "is-complete" : ""}">${mosComplete(candidate.id) ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`}</span></div>
-      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false))}
+      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false, "Space"))}
       <section class="rating-panel layered-rating"><div class="panel-heading"><strong>整体维度与子维度</strong><span>1 很差 · 3 合格 · 5 优秀</span></div>${groups}
-        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>扣分问题多选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${deductionPanel}</section>
+        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>扣分问题多选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
         <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span><small>所有分数均须备注</small></div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
       </section>
     </section>`;
@@ -981,7 +1091,7 @@
     const answer = state.eloMatches[match.match_id];
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">ELO MATCH · ${matchIndex + 1}/${state.task.eloMatchCount}</span><h2 class="stage-title">从四个维度分别判断胜、平、负</h2></div><span class="stage-state ${eloMatchComplete(match.match_id) ? "is-complete" : ""}">${eloMatchComplete(match.match_id) ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`}</span></div>
-      ${renderStickyContext(`<div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true)}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true)}</div>`)}
+      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true, "A")}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true, "B")}</div><div class="comparison-shortcuts"><span><kbd>Space</kbd> 最近音频播放／暂停</span><span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span></div></div>`)}
       <section class="rating-panel elo-rating">
         <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
         <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
@@ -1078,6 +1188,7 @@
   }
 
   function render() {
+    rememberAllAudioPlayback();
     const currentRail = typeof root.querySelector === "function" ? root.querySelector(".task-rail") : null;
     if (currentRail) state.railScrollTop = currentRail.scrollTop;
     if (state.screen === "import") renderImport();
@@ -1096,32 +1207,95 @@
           state.railScrollTop = nextRail.scrollTop;
         }
       }
+      initializeAudioPlayers();
     }
   }
 
-  function renderKeepingAudio() {
-    const playback = Array.from(root.querySelectorAll("audio")).map((audio) => ({
-      src: audio.currentSrc || audio.src,
-      time: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
-      paused: audio.paused,
-      volume: audio.volume
-    }));
-    render();
-    Array.from(root.querySelectorAll("audio")).forEach((audio, index) => {
-      const saved = playback[index];
-      if (!saved || (audio.currentSrc || audio.src) !== saved.src) return;
-      const restore = () => {
-        try {
-          audio.currentTime = saved.time;
-          audio.volume = saved.volume;
-          if (!saved.paused) audio.play().catch(() => {});
-        } catch (error) {
-          /* The browser may reject seeking before metadata is available. */
-        }
-      };
-      if (audio.readyState >= 1) restore();
-      else audio.addEventListener("loadedmetadata", restore, { once: true });
+  function replaceHtml(element, html) {
+    if (!element) return null;
+    const template = document.createElement("template");
+    template.innerHTML = String(html).trim();
+    const replacement = template.content.firstElementChild;
+    if (!replacement) return null;
+    element.replaceWith(replacement);
+    return replacement;
+  }
+
+  function dimensionRenderConfig(dimensionKey) {
+    for (const group of MOS_GROUPS) {
+      const subdimension = (group.subdimensions || []).find((dimension) => dimension.key === dimensionKey);
+      if (subdimension) return { dimension: subdimension, config: { subdimension: true, groupKey: group.key } };
+      if (group.overall && group.overall.key === dimensionKey) return { dimension: group.overall, config: { overall: true } };
+    }
+    const dimension = DIMENSIONS.find((item) => item.key === dimensionKey);
+    return dimension ? { dimension, config: {} } : null;
+  }
+
+  function refreshInstructionPanel(group, candidateId, answer) {
+    if (!group) return;
+    const existing = group.querySelector(".instruction-issues");
+    const markup = renderInstructionDeductions(candidateId, answer);
+    if (existing && markup) replaceHtml(existing, markup);
+    else if (existing) existing.remove();
+    else if (markup) group.insertAdjacentHTML("beforeend", markup);
+  }
+
+  function refreshCurrentStageState() {
+    const element = root.querySelector(".stage-state");
+    if (!element || !state.task) return;
+    if (state.currentIndex < state.task.modelCount) {
+      const candidate = state.task.candidates[state.currentIndex];
+      const complete = mosComplete(candidate.id);
+      element.classList.toggle("is-complete", complete);
+      element.innerHTML = complete ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`;
+      return;
+    }
+    const match = state.task.eloMatches[state.currentIndex - state.task.modelCount];
+    const complete = eloMatchComplete(match.match_id);
+    element.classList.toggle("is-complete", complete);
+    element.innerHTML = complete ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`;
+  }
+
+  function refreshWorkspaceStatus() {
+    if (state.screen !== "task") return;
+    const rail = root.querySelector(".task-rail");
+    const railScrollTop = rail ? rail.scrollTop : state.railScrollTop;
+    replaceHtml(root.querySelector(".progress-band"), renderProgressBand());
+    const nextRail = replaceHtml(rail, renderTaskRail());
+    if (nextRail) {
+      nextRail.scrollTop = railScrollTop;
+      state.railScrollTop = railScrollTop;
+    }
+    replaceHtml(root.querySelector(".action-bar"), renderActionBar());
+    refreshCurrentStageState();
+  }
+
+  function refreshMosDimension(block, candidateId, dimensionKey) {
+    const definition = dimensionRenderConfig(dimensionKey);
+    const answer = state.mos[candidateId];
+    if (!block || !definition || !answer) return;
+    const group = block.closest(".mos-group");
+    replaceHtml(block, renderDimension(candidateId, definition.dimension, answer, definition.config));
+    if (dimensionKey === INSTRUCTION_DIMENSION.key) refreshInstructionPanel(group, candidateId, answer);
+    refreshWorkspaceStatus();
+  }
+
+  function refreshIssuePanel(panel, candidateId, dimensionKey) {
+    const definition = dimensionRenderConfig(dimensionKey);
+    const answer = state.mos[candidateId];
+    if (panel && definition && answer) replaceHtml(panel, renderIssueChips(candidateId, definition.dimension, answer));
+    refreshWorkspaceStatus();
+  }
+
+  function refreshEloOutcomeButtons(group, selectedOutcome) {
+    if (!group) return;
+    group.querySelectorAll("button[data-outcome]").forEach((button) => {
+      const selected = button.dataset.outcome === selectedOutcome;
+      button.classList.toggle("is-selected", selected);
+      button.classList.toggle("is-draw", selected && selectedOutcome === "draw");
+      button.setAttribute("aria-pressed", String(selected));
     });
+    refreshWorkspaceStatus();
   }
 
   function goNext() {
@@ -1135,7 +1309,7 @@
       return;
     }
     if (state.currentIndex < state.task.totalSubtaskCount - 1) state.currentIndex += 1;
-    saveDraft();
+    flushDraftSave();
     render();
   }
 
@@ -1147,7 +1321,7 @@
     }
     if (!state.exportResult) state.exportResult = createAnnotation();
     state.screen = "result";
-    saveDraft();
+    flushDraftSave();
     render();
   }
 
@@ -1170,6 +1344,12 @@
     state.restoredDraft = false;
     state.sourceAnnotation = null;
     state.railScrollTop = 0;
+    playbackMemory.clear();
+    lastActiveAudioKey = "";
+    if (draftSaveTimer != null) {
+      window.clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
     render();
   }
 
@@ -1178,26 +1358,78 @@
     if (event.target.dataset.role === "mos-note") {
       state.mos[event.target.dataset.id].notes[event.target.dataset.dimension] = event.target.value;
       state.exportResult = null;
-      saveDraft();
+      scheduleDraftSave();
     }
     if (event.target.dataset.role === "instruction-note") {
       state.mos[event.target.dataset.id].instruction_note = event.target.value;
       state.exportResult = null;
-      saveDraft();
+      scheduleDraftSave();
     }
     if (event.target.dataset.role === "elo-note") {
       state.eloMatches[event.target.dataset.match].note = event.target.value;
       state.exportResult = null;
-      saveDraft();
+      scheduleDraftSave();
     }
   });
 
   root.addEventListener("play", (event) => {
     if (!event.target || event.target.tagName !== "AUDIO") return;
     root.querySelectorAll("audio").forEach((audio) => {
-      if (audio !== event.target && !audio.paused) audio.pause();
+      if (audio !== event.target && !audio.paused) {
+        audio.pause();
+        rememberAudioPlayback(audio);
+      }
     });
+    lastActiveAudioKey = audioPlaybackKey(event.target);
+    rememberAudioPlayback(event.target);
   }, true);
+
+  ["pause", "timeupdate", "seeked", "volumechange"].forEach((eventName) => {
+    root.addEventListener(eventName, (event) => {
+      if (event.target && event.target.tagName === "AUDIO") rememberAudioPlayback(event.target);
+    }, true);
+  });
+
+  root.addEventListener("ended", (event) => {
+    if (event.target && event.target.tagName === "AUDIO") rememberAudioPlayback(event.target, { reset: true });
+  }, true);
+
+  root.addEventListener("keydown", (event) => {
+    if (state.screen !== "task" || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isKeyboardInputTarget(event.target)) return;
+    const players = currentAudioPlayers();
+    if (!players.length) return;
+    const eloStage = state.currentIndex >= state.task.modelCount;
+    const key = String(event.key || "").toLowerCase();
+    let audio = null;
+
+    if (eloStage && (key === "a" || key === "b")) {
+      if (event.repeat) return;
+      audio = players[key === "a" ? 0 : 1] || null;
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      toggleAudioPlayback(audio);
+      return;
+    }
+
+    if (key === " " || event.code === "Space") {
+      if (event.repeat) return;
+      audio = preferredAudioPlayer();
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      toggleAudioPlayback(audio);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      audio = preferredAudioPlayer();
+      if (!audio) return;
+      event.preventDefault();
+      lastActiveAudioKey = audioPlaybackKey(audio);
+      seekAudioPlayback(audio, event.key === "ArrowLeft" ? -5 : 5);
+    }
+  });
 
   root.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
@@ -1236,8 +1468,8 @@
       const answer = state.mos[target.dataset.id];
       answer.scores[target.dataset.dimension] = score;
       state.exportResult = null;
-      saveDraft();
-      return renderKeepingAudio();
+      scheduleDraftSave();
+      return refreshMosDimension(target.closest(".dimension-block"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-issue") {
       const answer = state.mos[target.dataset.id];
@@ -1246,8 +1478,8 @@
         ? selected.filter((item) => item !== target.dataset.issue)
         : selected.concat(target.dataset.issue);
       state.exportResult = null;
-      saveDraft();
-      return renderKeepingAudio();
+      scheduleDraftSave();
+      return refreshIssuePanel(target.closest(".issue-panel"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-deduction") {
       const answer = state.mos[target.dataset.id];
@@ -1255,8 +1487,11 @@
         ? answer.instruction_deductions.filter((item) => item !== target.dataset.issue)
         : answer.instruction_deductions.concat(target.dataset.issue);
       state.exportResult = null;
-      saveDraft();
-      return renderKeepingAudio();
+      scheduleDraftSave();
+      const panel = target.closest(".instruction-issues");
+      if (panel) replaceHtml(panel, renderInstructionDeductions(target.dataset.id, answer));
+      refreshWorkspaceStatus();
+      return;
     }
     if (action === "set-elo-outcome") {
       if (!["left", "draw", "right"].includes(target.dataset.outcome) || !ELO_DIMENSIONS.some((dimension) => dimension.key === target.dataset.dimension)) {
@@ -1264,19 +1499,19 @@
       }
       state.eloMatches[target.dataset.match].dimension_results[target.dataset.dimension] = target.dataset.outcome;
       state.exportResult = null;
-      saveDraft();
-      return renderKeepingAudio();
+      scheduleDraftSave();
+      return refreshEloOutcomeButtons(target.closest(".elo-outcomes"), target.dataset.outcome);
     }
     if (action === "go-task") {
       const index = Number(target.dataset.index);
       if (index >= state.task.modelCount && progress().mos < state.task.modelCount) return toast("完成全部 MOS 后才能进入 ELO 对战", "error");
       state.currentIndex = index;
-      saveDraft();
+      flushDraftSave();
       return render();
     }
     if (action === "previous") {
       state.currentIndex = Math.max(0, state.currentIndex - 1);
-      saveDraft();
+      flushDraftSave();
       return render();
     }
     if (action === "next") return goNext();

@@ -8,10 +8,15 @@ const vm = require("vm");
 const base = __dirname;
 
 function fakeRoot() {
+  const listeners = {};
   return {
     innerHTML: "",
     scrollTop: 0,
-    addEventListener() {},
+    _listeners: listeners,
+    addEventListener(name, handler) {
+      if (!listeners[name]) listeners[name] = [];
+      listeners[name].push(handler);
+    },
     querySelector() { return null; },
     querySelectorAll() { return []; }
   };
@@ -132,9 +137,83 @@ function testReviewer(line, modelCount) {
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
+
+  const initialAudio = {
+    tagName: "AUDIO",
+    currentSrc: parsed.task.candidates[0].url,
+    src: parsed.task.candidates[0].url,
+    currentTime: 4.25,
+    volume: 0.8,
+    paused: false,
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
+  };
+  const nextAudio = {
+    tagName: "AUDIO",
+    currentSrc: parsed.task.candidates[1].url,
+    src: parsed.task.candidates[1].url,
+    currentTime: 1.5,
+    volume: 1,
+    paused: false,
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
+  };
+  root.querySelectorAll = (selector) => String(selector).startsWith("audio") ? [initialAudio, nextAudio] : [];
+  root._listeners.play[0]({ target: nextAudio });
+  assert.strictEqual(initialAudio.paused, true, "starting B must pause A");
+  assert.strictEqual(initialAudio.currentTime, 4.25, "pausing A must preserve its playback position");
+  assert.strictEqual(nextAudio.paused, false, "starting B must not pause B itself");
+  nextAudio.paused = true;
+  root._listeners.pause[0]({ target: nextAudio });
+  assert.strictEqual(nextAudio.paused, true, "manual pause must remain paused without an auto-resume path");
+
+  const shortcutEvent = (key) => ({
+    key,
+    code: key === " " ? "Space" : "",
+    repeat: false,
+    isComposing: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    prevented: false,
+    preventDefault() { this.prevented = true; },
+    target: { closest() { return null; } }
+  });
+  api.state.currentIndex = modelCount;
+  const playB = shortcutEvent("b");
+  root._listeners.keydown[0](playB);
+  assert.strictEqual(playB.prevented, true, "ELO B shortcut must consume the key");
+  assert.strictEqual(nextAudio.paused, false, "ELO B shortcut must start candidate B");
+  const pauseRecent = shortcutEvent(" ");
+  root._listeners.keydown[0](pauseRecent);
+  assert.strictEqual(nextAudio.paused, true, "Space must pause the most recently selected audio");
+  const seekRecent = shortcutEvent("ArrowRight");
+  root._listeners.keydown[0](seekRecent);
+  assert.strictEqual(nextAudio.currentTime, 6.5, "ArrowRight must seek the recent audio forward five seconds");
+  api.state.currentIndex = 0;
+  root.querySelectorAll = () => [];
+
+  const mosHtmlBeforeClick = root.innerHTML;
+  const mosTarget = {
+    dataset: { action: "set-score", id: parsed.task.candidates[0].id, dimension: "melody", score: "4" },
+    closest(selector) { return selector === "[data-action]" ? this : null; }
+  };
+  root._listeners.click[0]({ target: mosTarget });
+  assert.strictEqual(root.innerHTML, mosHtmlBeforeClick, "MOS score clicks must not rebuild the audio workspace");
+  assert.strictEqual(api.state.mos[parsed.task.candidates[0].id].scores.melody, 4);
+
   api.state.currentIndex = modelCount;
   api.render();
   parsed.task.candidates.forEach((candidate) => assert(!root.innerHTML.includes(candidate.id), "ELO screen must hide Blind IDs"));
+  const eloHtmlBeforeClick = root.innerHTML;
+  const firstMatch = parsed.task.eloMatches[0];
+  const eloTarget = {
+    dataset: { action: "set-elo-outcome", match: firstMatch.match_id, dimension: "musicality", outcome: "left" },
+    closest(selector) { return selector === "[data-action]" ? this : null; }
+  };
+  root._listeners.click[0]({ target: eloTarget });
+  assert.strictEqual(root.innerHTML, eloHtmlBeforeClick, "ELO outcome clicks must not rebuild either audio player");
+  assert.strictEqual(api.state.eloMatches[firstMatch.match_id].dimension_results.musicality, "left");
   api.loadTask(quality.task, quality.annotation, { skipDraft: true, workMode: "quality" });
   assert(root.innerHTML.includes("质检验收模式"));
 
