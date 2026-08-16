@@ -24,9 +24,29 @@
   const SCORE_CAPTIONS = { 1: "很差", 2: "较差", 3: "合格", 4: "良好", 5: "优秀" };
   const STORAGE_PREFIX = "sonicbench-lite-review-draft/flexible-model/1.0/";
   const LAST_DRAFT_KEY = "sonicbench-lite-review-last-draft/flexible-model/1.0";
+  const PLAYBACK_PREFERENCE_KEY = "sonicbench-lite-playback-preferences/1.0";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
   let lastActiveAudioKey = "";
+  let lastRenderedSubtaskKey = "";
+  let rememberedVolume = 1;
+
+  function readAutoPlayPreference() {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(PLAYBACK_PREFERENCE_KEY) || "null");
+      return Boolean(value && value.auto_play_first_audio);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function writeAutoPlayPreference(enabled) {
+    try {
+      window.localStorage.setItem(PLAYBACK_PREFERENCE_KEY, JSON.stringify({ auto_play_first_audio: Boolean(enabled) }));
+    } catch (error) {
+      /* The preference remains active for this tab when storage is unavailable. */
+    }
+  }
 
   const state = {
     screen: "import",
@@ -44,7 +64,8 @@
     exportResult: null,
     restoredDraft: false,
     sourceAnnotation: null,
-    railScrollTop: 0
+    railScrollTop: 0,
+    autoPlayFirstAudio: readAutoPlayPreference()
   };
 
   function clone(value) {
@@ -55,9 +76,15 @@
     return audio ? audio.currentSrc || audio.src || "" : "";
   }
 
+  function remembersPlaybackPosition(audio) {
+    return Boolean(audio && (!audio.dataset || audio.dataset.positionMemory !== "none"));
+  }
+
   function rememberAudioPlayback(audio, options = {}) {
     const key = audioPlaybackKey(audio);
     if (!key) return;
+    if (Number.isFinite(audio.volume)) rememberedVolume = audio.volume;
+    if (!remembersPlaybackPosition(audio)) return;
     const current = playbackMemory.get(key) || { time: 0, volume: 1 };
     const time = options.reset
       ? 0
@@ -77,9 +104,13 @@
   function restoreAudioPlayback(audio) {
     const key = audioPlaybackKey(audio);
     const saved = key ? playbackMemory.get(key) : null;
-    if (!saved) return;
     try {
-      audio.volume = saved.volume;
+      audio.volume = saved && Number.isFinite(saved.volume) ? saved.volume : rememberedVolume;
+      if (!remembersPlaybackPosition(audio)) {
+        audio.currentTime = 0;
+        return;
+      }
+      if (!saved) return;
       const maxTime = Number.isFinite(audio.duration) && audio.duration > 0
         ? Math.max(0, audio.duration - 0.05)
         : saved.time;
@@ -110,6 +141,7 @@
   function toggleAudioPlayback(audio) {
     if (!audio) return;
     if (audio.paused) {
+      lastActiveAudioKey = audioPlaybackKey(audio);
       const playback = audio.play();
       if (playback && typeof playback.catch === "function") {
         playback.catch(() => toast("音频暂时无法播放，请检查链接是否有效", "error"));
@@ -127,9 +159,21 @@
     rememberAudioPlayback(audio);
   }
 
-  function isKeyboardInputTarget(target) {
-    if (!target || typeof target.closest !== "function") return false;
-    return Boolean(target.closest("input, textarea, select, button, a, audio, [contenteditable='true']"));
+  function currentSubtaskKey() {
+    if (!state.task || state.screen !== "task") return "";
+    return `${state.task.fingerprint}:${state.currentIndex}`;
+  }
+
+  function autoPlayCurrentTask() {
+    if (!state.autoPlayFirstAudio) return false;
+    const first = currentAudioPlayers()[0] || null;
+    if (!first) return false;
+    lastActiveAudioKey = audioPlaybackKey(first);
+    const playback = first.play();
+    if (playback && typeof playback.catch === "function") {
+      playback.catch(() => toast("浏览器阻止了自动播放，可点击播放器或使用组合快捷键继续", "error"));
+    }
+    return true;
   }
 
   function arraysEqual(a, b) {
@@ -609,6 +653,7 @@
     state.restoredDraft = false;
     playbackMemory.clear();
     lastActiveAudioKey = "";
+    lastRenderedSubtaskKey = "";
 
     if (!annotation && !opts.skipDraft) {
       const draft = readStorage(draftKey(task));
@@ -906,6 +951,15 @@
     </header>`;
   }
 
+  function renderAutoPlayToggle() {
+    const enabled = state.autoPlayFirstAudio;
+    return `<button type="button" class="autoplay-toggle ${enabled ? "is-on" : ""}" data-action="toggle-autoplay" aria-pressed="${enabled}" title="${enabled ? "关闭" : "开启"}进入子任务时自动播放第一个音频">
+      <span class="autoplay-toggle-icon">${icon("headphones", 14)}</span>
+      <span class="autoplay-toggle-copy"><strong>首音频自动播放</strong><small>${enabled ? "已开启" : "已关闭"}</small></span>
+      <span class="autoplay-switch" aria-hidden="true"><i></i></span>
+    </button>`;
+  }
+
   function renderErrors() {
     if (!state.errors.length) return "";
     return `<div class="validation-panel" role="alert">
@@ -1024,10 +1078,10 @@
         <span class="candidate-marker">${h(label)}</span>
         ${identity}
       </div>
-      <audio class="audio-player" controls preload="metadata" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
+      <audio class="audio-player" controls preload="metadata" data-position-memory="${hideIdentity ? "none" : "task"}" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
       <div class="playback-shortcuts" aria-label="播放器快捷键">
-        <span><kbd>${h(shortcutKey)}</kbd> 播放／暂停</span>
-        ${compact ? "" : `<span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span>`}
+        <span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>${h(shortcutKey)}</kbd> 播放／暂停</span>
+        ${compact ? "" : `<span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>,</kbd><kbd>.</kbd> 前后 5 秒</span>`}
       </div>
     </article>`;
   }
@@ -1091,7 +1145,7 @@
     const answer = state.eloMatches[match.match_id];
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">ELO MATCH · ${matchIndex + 1}/${state.task.eloMatchCount}</span><h2 class="stage-title">从四个维度分别判断胜、平、负</h2></div><span class="stage-state ${eloMatchComplete(match.match_id) ? "is-complete" : ""}">${eloMatchComplete(match.match_id) ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`}</span></div>
-      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true, "A")}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true, "B")}</div><div class="comparison-shortcuts"><span><kbd>Space</kbd> 最近音频播放／暂停</span><span><kbd>←</kbd><kbd>→</kbd> 前后 5 秒</span></div></div>`)}
+      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true, "1")}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true, "2")}</div><div class="comparison-shortcuts"><span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>Space</kbd> 最近音频播放／暂停</span><span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>,</kbd><kbd>.</kbd> 前后 5 秒</span><span>切换对战后从 0:00 开始</span></div></div>`)}
       <section class="rating-panel elo-rating">
         <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
         <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
@@ -1128,7 +1182,7 @@
     const history = state.sourceAnnotation || {};
     const taskSurface = state.currentIndex < task.modelCount ? renderMosTask(state.currentIndex) : renderEloTask(state.currentIndex - task.modelCount);
     root.innerHTML = `<div class="review-shell">
-      ${renderTopbar(`<button class="button ghost compact" data-action="change-order">${icon("paste", 15)} 更换工单</button>`)}
+      ${renderTopbar(`${renderAutoPlayToggle()}<button class="button ghost compact" data-action="change-order">${icon("paste", 15)} 更换工单</button>`)}
       <main class="review-workspace">
         <section class="workspace-header">
           <div class="case-header"><div><span class="eyebrow">${h(task.taskBundleId)}</span><h1>${h(task.caseId)}</h1></div><div class="case-meta"><span>${task.modelCount} 模型 · ${task.totalSubtaskCount} 子任务</span><span>${h(task.batchId)}</span><span class="mono">FP ${h(task.fingerprint)}</span></div></div>
@@ -1189,6 +1243,9 @@
 
   function render() {
     rememberAllAudioPlayback();
+    const nextSubtaskKey = currentSubtaskKey();
+    const enteredNewSubtask = Boolean(nextSubtaskKey && nextSubtaskKey !== lastRenderedSubtaskKey);
+    if (enteredNewSubtask) lastActiveAudioKey = "";
     const currentRail = typeof root.querySelector === "function" ? root.querySelector(".task-rail") : null;
     if (currentRail) state.railScrollTop = currentRail.scrollTop;
     if (state.screen === "import") renderImport();
@@ -1208,6 +1265,8 @@
         }
       }
       initializeAudioPlayers();
+      lastRenderedSubtaskKey = nextSubtaskKey;
+      if (enteredNewSubtask) autoPlayCurrentTask();
     }
   }
 
@@ -1346,6 +1405,7 @@
     state.railScrollTop = 0;
     playbackMemory.clear();
     lastActiveAudioKey = "";
+    lastRenderedSubtaskKey = "";
     if (draftSaveTimer != null) {
       window.clearTimeout(draftSaveTimer);
       draftSaveTimer = null;
@@ -1395,16 +1455,17 @@
   }, true);
 
   root.addEventListener("keydown", (event) => {
-    if (state.screen !== "task" || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isKeyboardInputTarget(event.target)) return;
+    if (state.screen !== "task" || event.repeat || event.altKey) return;
+    const hasPrimaryModifier = Boolean(event.metaKey || event.ctrlKey);
+    if (!hasPrimaryModifier || !event.shiftKey) return;
     const players = currentAudioPlayers();
     if (!players.length) return;
     const eloStage = state.currentIndex >= state.task.modelCount;
-    const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "");
     let audio = null;
 
-    if (eloStage && (key === "a" || key === "b")) {
-      if (event.repeat) return;
-      audio = players[key === "a" ? 0 : 1] || null;
+    if (eloStage && (code === "Digit1" || code === "Digit2")) {
+      audio = players[code === "Digit1" ? 0 : 1] || null;
       if (!audio) return;
       event.preventDefault();
       lastActiveAudioKey = audioPlaybackKey(audio);
@@ -1412,8 +1473,7 @@
       return;
     }
 
-    if (key === " " || event.code === "Space") {
-      if (event.repeat) return;
+    if (code === "Space") {
       audio = preferredAudioPlayer();
       if (!audio) return;
       event.preventDefault();
@@ -1422,12 +1482,12 @@
       return;
     }
 
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    if (code === "Comma" || code === "Period") {
       audio = preferredAudioPlayer();
       if (!audio) return;
       event.preventDefault();
       lastActiveAudioKey = audioPlaybackKey(audio);
-      seekAudioPlayback(audio, event.key === "ArrowLeft" ? -5 : 5);
+      seekAudioPlayback(audio, code === "Comma" ? -5 : 5);
     }
   });
 
@@ -1440,6 +1500,14 @@
     if (action === "demo-history") return loadDemo(true);
     if (action === "demo-quality") return loadQualityDemo();
     if (action === "resume-draft") return resumeLastDraft();
+    if (action === "toggle-autoplay") {
+      state.autoPlayFirstAudio = !state.autoPlayFirstAudio;
+      writeAutoPlayPreference(state.autoPlayFirstAudio);
+      replaceHtml(target, renderAutoPlayToggle());
+      if (state.autoPlayFirstAudio) autoPlayCurrentTask();
+      toast(state.autoPlayFirstAudio ? "已开启：进入新子任务时自动播放第一个音频" : "已关闭子任务自动播放", "success");
+      return;
+    }
     if (action === "set-import-mode") {
       state.importMode = target.dataset.mode === "quality" ? "quality" : "annotate";
       state.pasteText = "";
