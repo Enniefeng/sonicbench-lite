@@ -254,6 +254,10 @@ to{opacity:1;transform:translateY(0);}
 .icon-button{display:grid;width:34px;height:34px;place-items:center;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,0.76);color:var(--ink-500);cursor:pointer;}
 .icon-button:hover{border-color:rgba(112,87,217,0.3);color:var(--violet);}
 .audio-player,audio{display:block;width:100%;height:42px;accent-color:var(--violet);}
+.playback-shortcuts,.comparison-shortcuts{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;color:var(--ink-500);font-size:9px;line-height:1.4;}
+.playback-shortcuts{justify-content:flex-end;margin-top:8px;}
+.playback-shortcuts span,.comparison-shortcuts span{display:inline-flex;align-items:center;gap:4px;}
+.playback-shortcuts kbd,.comparison-shortcuts kbd{display:inline-grid;min-width:20px;height:20px;place-items:center;padding:0 5px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;background:rgba(255,255,255,.88);color:var(--ink-650);font:700 9px var(--mono);box-shadow:0 1px 2px rgba(34,22,50,.06);}
 .rating-panel{overflow:hidden;margin-top:12px;}
 .rating-panel > .panel-heading{align-items:center;padding:12px 15px;border-bottom:1px solid var(--line);background:var(--mist-50);}
 .rating-panel > .panel-heading strong{font-size:11px;}
@@ -270,6 +274,8 @@ to{opacity:1;transform:translateY(0);}
 .score-button b{font-size:12px;line-height:1;}
 .score-button span{font-size:7px;font-weight:620;}
 .comparison-grid{display:grid;grid-template-columns:minmax(0,1fr) 38px minmax(0,1fr);gap:10px;align-items:center;}
+.comparison-stack{display:grid;gap:8px;}
+.comparison-shortcuts{justify-content:center;padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.9);}
 .versus-mark{display:grid;width:38px;height:38px;place-items:center;border:1px solid var(--line);border-radius:50%;background:var(--plum-950);color:var(--white);font:750 9px var(--mono);box-shadow:0 7px 18px rgba(23,18,36,0.18);}
 .winner-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:14px;}
 .winner-button{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;min-height:72px;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--white);color:var(--ink-650);text-align:left;cursor:pointer;transition:border-color 150ms ease,background 150ms ease,color 150ms ease,transform 150ms ease;}
