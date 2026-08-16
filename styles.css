@@ -23,6 +23,18 @@ svg{display:block;flex:0 0 auto;}
 .brand-lockup strong,.review-brand strong{font-size:14px;font-weight:730;letter-spacing:0.01em;}
 .brand-lockup small,.review-brand small{color:rgba(255,255,255,0.56);font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;}
 .topbar-context,.topbar-actions{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,0.72);font-size:12px;}
+.autoplay-toggle{display:flex;min-height:36px;align-items:center;gap:8px;padding:5px 8px;border:1px solid rgba(255,255,255,.13);border-radius:10px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.72);cursor:pointer;transition:border-color 150ms ease,background 150ms ease,color 150ms ease;}
+.autoplay-toggle:hover{border-color:rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:var(--white);}
+.autoplay-toggle.is-on{border-color:rgba(105,208,200,.34);background:rgba(105,208,200,.13);color:#a8e7e2;}
+.autoplay-toggle-icon{display:grid;width:24px;height:24px;place-items:center;border-radius:7px;background:rgba(255,255,255,.08);}
+.autoplay-toggle-copy{display:grid;gap:1px;text-align:left;white-space:nowrap;}
+.autoplay-toggle-copy strong{font-size:9px;line-height:1.15;}
+.autoplay-toggle-copy small{color:rgba(255,255,255,.48);font-size:8px;line-height:1.1;}
+.autoplay-toggle.is-on .autoplay-toggle-copy small{color:#89d8d2;}
+.autoplay-switch{position:relative;width:28px;height:16px;flex:0 0 28px;border-radius:999px;background:rgba(255,255,255,.16);}
+.autoplay-switch i{position:absolute;top:3px;left:3px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.7);transition:transform 150ms ease,background 150ms ease;}
+.autoplay-toggle.is-on .autoplay-switch{background:var(--teal);}
+.autoplay-toggle.is-on .autoplay-switch i{transform:translateX(12px);background:var(--white);}
 .context-dot{width:7px;height:7px;border-radius:50%;background:#69d0c8;box-shadow:0 0 0 5px rgba(105,208,200,0.12);}
 .privacy-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid rgba(255,255,255,0.11);border-radius:999px;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.78);font-weight:600;}
 /* Shared actions */ .button,.btn{display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:8px;padding:9px 15px;border:1px solid transparent;border-radius:10px;background:var(--white);color:var(--ink-800);font-size:13px;font-weight:680;line-height:1.2;cursor:pointer;transition:transform 150ms ease,border-color 150ms ease,background-color 150ms ease,color 150ms ease,box-shadow 150ms ease;}
@@ -257,7 +269,7 @@ to{opacity:1;transform:translateY(0);}
 .playback-shortcuts,.comparison-shortcuts{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;color:var(--ink-500);font-size:9px;line-height:1.4;}
 .playback-shortcuts{justify-content:flex-end;margin-top:8px;}
 .playback-shortcuts span,.comparison-shortcuts span{display:inline-flex;align-items:center;gap:4px;}
-.playback-shortcuts kbd,.comparison-shortcuts kbd{display:inline-grid;min-width:20px;height:20px;place-items:center;padding:0 5px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;background:rgba(255,255,255,.88);color:var(--ink-650);font:700 9px var(--mono);box-shadow:0 1px 2px rgba(34,22,50,.06);}
+.playback-shortcuts kbd,.comparison-shortcuts kbd{display:inline-grid;min-width:20px;height:20px;place-items:center;padding:0 5px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;background:rgba(255,255,255,.88);color:var(--ink-650);font:700 8px var(--mono);box-shadow:0 1px 2px rgba(34,22,50,.06);white-space:nowrap;}
 .rating-panel{overflow:hidden;margin-top:12px;}
 .rating-panel > .panel-heading{align-items:center;padding:12px 15px;border-bottom:1px solid var(--line);background:var(--mist-50);}
 .rating-panel > .panel-heading strong{font-size:11px;}
@@ -393,7 +405,7 @@ to{opacity:1;transform:translateY(0);}
 .result-hero{align-items:flex-start;}
 .result-actions,.result-actions .button{width:100%;}
 }
-@media (max-width:540px){.brand-lockup small,.review-brand small,.topbar-actions .button{display:none;}
+@media (max-width:540px){.brand-lockup small,.review-brand small,.topbar-actions .button,.autoplay-toggle-copy{display:none;}
 .admin-main,.review-workspace,.review-import,.result-page{width:min(100% - 20px,var(--page));}
 .admin-hero{padding:23px 18px;}
 .task-formula{display:grid;grid-template-columns:1fr;gap:6px;}
