@@ -104,7 +104,8 @@ function adminLine(modelCount) {
 function testReviewer(line, modelCount) {
   const { context, root } = makeContext("review-app");
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
-    "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render"
+    "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
+    "initializeAudioPlayers", "autoPlayCurrentTask"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -134,6 +135,8 @@ function testReviewer(line, modelCount) {
   api.loadTask(parsed.task, null, { skipDraft: true });
   assert(root.innerHTML.includes(`${modelCount} 模型 · ${parsed.task.totalSubtaskCount} 子任务`));
   assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
+  assert(root.innerHTML.includes("首音频自动播放"), "task header must expose the autoplay preference");
+  assert(root.innerHTML.includes("⌘/Ctrl"), "player hints must show the guarded shortcut modifier");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--mos/g) || []).length, modelCount);
   assert.strictEqual((root.innerHTML.match(/progress-segment--elo/g) || []).length, parsed.task.eloMatchCount);
@@ -144,7 +147,10 @@ function testReviewer(line, modelCount) {
     src: parsed.task.candidates[0].url,
     currentTime: 4.25,
     volume: 0.8,
+    readyState: 1,
     paused: false,
+    dataset: { positionMemory: "none" },
+    addEventListener() {},
     pause() { this.paused = true; },
     play() { this.paused = false; return Promise.resolve(); }
   };
@@ -154,7 +160,10 @@ function testReviewer(line, modelCount) {
     src: parsed.task.candidates[1].url,
     currentTime: 1.5,
     volume: 1,
+    readyState: 1,
     paused: false,
+    dataset: { positionMemory: "none" },
+    addEventListener() {},
     pause() { this.paused = true; },
     play() { this.paused = false; return Promise.resolve(); }
   };
@@ -167,29 +176,63 @@ function testReviewer(line, modelCount) {
   root._listeners.pause[0]({ target: nextAudio });
   assert.strictEqual(nextAudio.paused, true, "manual pause must remain paused without an auto-resume path");
 
-  const shortcutEvent = (key) => ({
-    key,
-    code: key === " " ? "Space" : "",
+  const shortcutEvent = (code, target = { closest() { return null; } }, active = true) => ({
+    key: "",
+    code,
     repeat: false,
     isComposing: false,
-    metaKey: false,
+    metaKey: active,
     ctrlKey: false,
+    shiftKey: active,
     altKey: false,
     prevented: false,
     preventDefault() { this.prevented = true; },
-    target: { closest() { return null; } }
+    target
   });
   api.state.currentIndex = modelCount;
-  const playB = shortcutEvent("b");
+  nextAudio.paused = true;
+  const unguardedB = shortcutEvent("Digit2", undefined, false);
+  root._listeners.keydown[0](unguardedB);
+  assert.strictEqual(unguardedB.prevented, false, "unguarded number keys must remain available to the page");
+  assert.strictEqual(nextAudio.paused, true, "unguarded number keys must not control playback");
+  const noteTarget = { closest(selector) { return selector.includes("textarea") ? this : null; } };
+  const playB = shortcutEvent("Digit2", noteTarget);
   root._listeners.keydown[0](playB);
-  assert.strictEqual(playB.prevented, true, "ELO B shortcut must consume the key");
-  assert.strictEqual(nextAudio.paused, false, "ELO B shortcut must start candidate B");
-  const pauseRecent = shortcutEvent(" ");
+  assert.strictEqual(playB.prevented, true, "guarded ELO B shortcut must consume the key while editing a note");
+  assert.strictEqual(nextAudio.paused, false, "guarded ELO B shortcut must start candidate B from a note field");
+  const pauseRecent = shortcutEvent("Space", noteTarget);
   root._listeners.keydown[0](pauseRecent);
-  assert.strictEqual(nextAudio.paused, true, "Space must pause the most recently selected audio");
-  const seekRecent = shortcutEvent("ArrowRight");
+  assert.strictEqual(nextAudio.paused, true, "guarded Space must pause the most recently selected audio");
+  const seekRecent = shortcutEvent("Period", noteTarget);
   root._listeners.keydown[0](seekRecent);
-  assert.strictEqual(nextAudio.currentTime, 6.5, "ArrowRight must seek the recent audio forward five seconds");
+  assert.strictEqual(nextAudio.currentTime, 6.5, "guarded period must seek the recent audio forward five seconds");
+
+  nextAudio.currentTime = 38;
+  root._listeners.pause[0]({ target: nextAudio });
+  const nextMatchAudio = {
+    tagName: "AUDIO",
+    currentSrc: nextAudio.currentSrc,
+    src: nextAudio.src,
+    currentTime: 0,
+    duration: 120,
+    volume: 0.3,
+    readyState: 1,
+    paused: true,
+    dataset: { positionMemory: "none" },
+    addEventListener() {},
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
+  };
+  api.initializeAudioPlayers({ querySelectorAll() { return [nextMatchAudio]; } });
+  assert.strictEqual(nextMatchAudio.currentTime, 0, "a new ELO match must not restore a candidate position from an earlier match");
+
+  initialAudio.paused = true;
+  nextAudio.paused = true;
+  api.state.autoPlayFirstAudio = true;
+  api.autoPlayCurrentTask();
+  assert.strictEqual(initialAudio.paused, false, "autoplay must start the first audio in the current subtask");
+  assert.strictEqual(nextAudio.paused, true, "autoplay must not start the second ELO audio");
+  api.state.autoPlayFirstAudio = false;
   api.state.currentIndex = 0;
   root.querySelectorAll = () => [];
 
