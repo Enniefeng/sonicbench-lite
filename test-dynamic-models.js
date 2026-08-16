@@ -145,7 +145,8 @@ function testReviewer(line, modelCount) {
     currentTime: 4.25,
     volume: 0.8,
     paused: false,
-    pause() { this.paused = true; }
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
   };
   const nextAudio = {
     tagName: "AUDIO",
@@ -154,9 +155,10 @@ function testReviewer(line, modelCount) {
     currentTime: 1.5,
     volume: 1,
     paused: false,
-    pause() { this.paused = true; }
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
   };
-  root.querySelectorAll = (selector) => selector === "audio" ? [initialAudio, nextAudio] : [];
+  root.querySelectorAll = (selector) => String(selector).startsWith("audio") ? [initialAudio, nextAudio] : [];
   root._listeners.play[0]({ target: nextAudio });
   assert.strictEqual(initialAudio.paused, true, "starting B must pause A");
   assert.strictEqual(initialAudio.currentTime, 4.25, "pausing A must preserve its playback position");
@@ -164,6 +166,31 @@ function testReviewer(line, modelCount) {
   nextAudio.paused = true;
   root._listeners.pause[0]({ target: nextAudio });
   assert.strictEqual(nextAudio.paused, true, "manual pause must remain paused without an auto-resume path");
+
+  const shortcutEvent = (key) => ({
+    key,
+    code: key === " " ? "Space" : "",
+    repeat: false,
+    isComposing: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    prevented: false,
+    preventDefault() { this.prevented = true; },
+    target: { closest() { return null; } }
+  });
+  api.state.currentIndex = modelCount;
+  const playB = shortcutEvent("b");
+  root._listeners.keydown[0](playB);
+  assert.strictEqual(playB.prevented, true, "ELO B shortcut must consume the key");
+  assert.strictEqual(nextAudio.paused, false, "ELO B shortcut must start candidate B");
+  const pauseRecent = shortcutEvent(" ");
+  root._listeners.keydown[0](pauseRecent);
+  assert.strictEqual(nextAudio.paused, true, "Space must pause the most recently selected audio");
+  const seekRecent = shortcutEvent("ArrowRight");
+  root._listeners.keydown[0](seekRecent);
+  assert.strictEqual(nextAudio.currentTime, 6.5, "ArrowRight must seek the recent audio forward five seconds");
+  api.state.currentIndex = 0;
   root.querySelectorAll = () => [];
 
   const mosHtmlBeforeClick = root.innerHTML;
