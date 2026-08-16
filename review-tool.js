@@ -27,7 +27,6 @@
   const PLAYBACK_PREFERENCE_KEY = "sonicbench-lite-playback-preferences/1.0";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
-  let lastActiveAudioKey = "";
   let lastRenderedSubtaskKey = "";
   let rememberedVolume = 1;
 
@@ -133,32 +132,6 @@
     return Array.from(root.querySelectorAll("audio.audio-player"));
   }
 
-  function preferredAudioPlayer() {
-    const players = currentAudioPlayers();
-    return players.find((audio) => audioPlaybackKey(audio) === lastActiveAudioKey) || players[0] || null;
-  }
-
-  function toggleAudioPlayback(audio) {
-    if (!audio) return;
-    if (audio.paused) {
-      lastActiveAudioKey = audioPlaybackKey(audio);
-      const playback = audio.play();
-      if (playback && typeof playback.catch === "function") {
-        playback.catch(() => toast("音频暂时无法播放，请检查链接是否有效", "error"));
-      }
-    } else {
-      audio.pause();
-      rememberAudioPlayback(audio);
-    }
-  }
-
-  function seekAudioPlayback(audio, deltaSeconds) {
-    if (!audio || !Number.isFinite(audio.currentTime)) return;
-    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Infinity;
-    audio.currentTime = Math.max(0, Math.min(duration, audio.currentTime + deltaSeconds));
-    rememberAudioPlayback(audio);
-  }
-
   function currentSubtaskKey() {
     if (!state.task || state.screen !== "task") return "";
     return `${state.task.fingerprint}:${state.currentIndex}`;
@@ -168,7 +141,6 @@
     if (!state.autoPlayFirstAudio) return false;
     const first = currentAudioPlayers()[0] || null;
     if (!first) return false;
-    lastActiveAudioKey = audioPlaybackKey(first);
     const playback = first.play();
     if (playback && typeof playback.catch === "function") {
       playback.catch(() => toast("浏览器阻止了自动播放，可点击播放器或使用组合快捷键继续", "error"));
@@ -436,6 +408,30 @@
         if (item.note != null && typeof item.note !== "string") errors.push(`${expected.match_id} 的备注必须是文本`);
       });
     }
+    if (annotation.revision_history != null) {
+      if (!Array.isArray(annotation.revision_history)) errors.push("revision_history 必须是数组");
+      else {
+        let previousRevision = 0;
+        annotation.revision_history.forEach((entry, index) => {
+          if (!entry || !Number.isInteger(entry.revision) || entry.revision <= previousRevision) {
+            errors.push(`revision_history[${index}] 的 revision 必须严格递增`);
+          } else previousRevision = entry.revision;
+          if (!entry || typeof entry.remark !== "string") errors.push(`revision_history[${index}] 缺少 remark`);
+          if (!entry || !Array.isArray(entry.changes)) errors.push(`revision_history[${index}] 缺少 changes 数组`);
+          else entry.changes.forEach((change, changeIndex) => {
+            const prefix = `revision_history[${index}].changes[${changeIndex}]`;
+            if (!change || !["mos", "elo"].includes(change.scope)) errors.push(`${prefix} 缺少合法 scope`);
+            if (!change || typeof change.subtask_id !== "string" || !change.subtask_id) errors.push(`${prefix} 缺少 subtask_id`);
+            if (!change || typeof change.field_path !== "string" || !change.field_path) errors.push(`${prefix} 缺少 field_path`);
+            if (!change || !Object.prototype.hasOwnProperty.call(change, "before") || !Object.prototype.hasOwnProperty.call(change, "after")) {
+              errors.push(`${prefix} 缺少 before/after`);
+            }
+          });
+        });
+        const latest = annotation.revision_history[annotation.revision_history.length - 1];
+        if (latest && latest.revision !== annotation.result_revision) errors.push("revision_history 最新版本与 result_revision 不一致");
+      }
+    }
     return [...new Set(errors)];
   }
 
@@ -652,7 +648,6 @@
     state.exportResult = null;
     state.restoredDraft = false;
     playbackMemory.clear();
-    lastActiveAudioKey = "";
     lastRenderedSubtaskKey = "";
 
     if (!annotation && !opts.skipDraft) {
@@ -728,38 +723,125 @@
     return { mos, elo, total: mos + elo };
   }
 
-  function changedCount() {
-    if (!state.baseline || !state.task) return 0;
-    let count = 0;
-    state.task.candidates.forEach((candidate) => {
-      if (JSON.stringify(state.mos[candidate.id]) !== JSON.stringify(state.baseline.mos[candidate.id])) count += 1;
+  function effectiveMosAnswer(answer) {
+    const source = answer || { scores: {}, low_score_issues: {}, notes: {}, instruction_deductions: [], instruction_note: "" };
+    const lowScoreIssues = {};
+    const notes = clone(source.notes || {});
+    SUBDIMENSIONS.forEach((dimension) => {
+      const active = Number(source.scores && source.scores[dimension.key]) <= 3;
+      lowScoreIssues[dimension.key] = active ? clone(source.low_score_issues && source.low_score_issues[dimension.key] || []) : [];
+      if (!active) notes[dimension.key] = "";
+    });
+    const instructionDeducted = Number(source.scores && source.scores[INSTRUCTION_DIMENSION.key]) < 5;
+    return {
+      scores: clone(source.scores || {}),
+      low_score_issues: lowScoreIssues,
+      notes,
+      instruction_deductions: instructionDeducted ? clone(source.instruction_deductions || []) : [],
+      instruction_note: instructionDeducted ? source.instruction_note || "" : ""
+    };
+  }
+
+  function valuesEqual(left, right) {
+    return JSON.stringify(left == null ? null : left) === JSON.stringify(right == null ? null : right);
+  }
+
+  function appendChange(changes, descriptor, before, after) {
+    if (valuesEqual(before, after)) return;
+    changes.push({
+      scope: descriptor.scope,
+      subtask_id: descriptor.subtask_id,
+      field_path: descriptor.field_path,
+      field_label: descriptor.field_label,
+      dimension_key: descriptor.dimension_key || null,
+      dimension_label: descriptor.dimension_label || null,
+      before: clone(before == null ? null : before),
+      after: clone(after == null ? null : after)
+    });
+  }
+
+  function collectChanges() {
+    if (!state.baseline || !state.task) return [];
+    const changes = [];
+    state.task.candidates.forEach((candidate, index) => {
+      const subtaskId = `MOS-${String(index + 1).padStart(2, "0")}`;
+      const before = effectiveMosAnswer(state.baseline.mos[candidate.id]);
+      const after = effectiveMosAnswer(state.mos[candidate.id]);
+      DIMENSIONS.forEach((dimension) => {
+        appendChange(changes, { scope: "mos", subtask_id: subtaskId, field_path: `scores.${dimension.key}`, field_label: `${dimension.label}评分`, dimension_key: dimension.key, dimension_label: dimension.label }, before.scores[dimension.key], after.scores[dimension.key]);
+      });
+      SUBDIMENSIONS.forEach((dimension) => {
+        appendChange(changes, { scope: "mos", subtask_id: subtaskId, field_path: `low_score_issues.${dimension.key}`, field_label: `${dimension.label}低分问题`, dimension_key: dimension.key, dimension_label: dimension.label }, before.low_score_issues[dimension.key] || [], after.low_score_issues[dimension.key] || []);
+      });
+      DIMENSIONS.forEach((dimension) => {
+        appendChange(changes, { scope: "mos", subtask_id: subtaskId, field_path: `notes.${dimension.key}`, field_label: `${dimension.label}备注`, dimension_key: dimension.key, dimension_label: dimension.label }, before.notes[dimension.key] || "", after.notes[dimension.key] || "");
+      });
+      appendChange(changes, { scope: "mos", subtask_id: subtaskId, field_path: "instruction_deductions", field_label: "指令遵循扣分项", dimension_key: INSTRUCTION_DIMENSION.key, dimension_label: INSTRUCTION_DIMENSION.label }, before.instruction_deductions, after.instruction_deductions);
+      appendChange(changes, { scope: "mos", subtask_id: subtaskId, field_path: "instruction_note", field_label: "指令遵循扣分原因", dimension_key: INSTRUCTION_DIMENSION.key, dimension_label: INSTRUCTION_DIMENSION.label }, before.instruction_note, after.instruction_note);
     });
     state.task.eloMatches.forEach((match) => {
-      if (JSON.stringify(state.eloMatches[match.match_id]) !== JSON.stringify(state.baseline.eloMatches[match.match_id])) count += 1;
+      const before = state.baseline.eloMatches[match.match_id] || { dimension_results: {}, note: "" };
+      const after = state.eloMatches[match.match_id] || { dimension_results: {}, note: "" };
+      ELO_DIMENSIONS.forEach((dimension) => {
+        appendChange(changes, { scope: "elo", subtask_id: match.match_id, field_path: `dimension_results.${dimension.key}`, field_label: `${dimension.label}结果`, dimension_key: dimension.key, dimension_label: dimension.label }, before.dimension_results[dimension.key], after.dimension_results[dimension.key]);
+      });
+      appendChange(changes, { scope: "elo", subtask_id: match.match_id, field_path: "note", field_label: "本场共用备注" }, before.note || "", after.note || "");
     });
-    return count;
+    return changes;
+  }
+
+  function changedCount() {
+    return collectChanges().length;
   }
 
   function taskChanged(index) {
     if (!state.baseline || !state.task) return false;
-    if (index < state.task.modelCount) {
-      const id = state.task.candidates[index].id;
-      return JSON.stringify(state.mos[id]) !== JSON.stringify(state.baseline.mos[id]);
+    const subtaskId = index < state.task.modelCount
+      ? `MOS-${String(index + 1).padStart(2, "0")}`
+      : state.task.eloMatches[index - state.task.modelCount].match_id;
+    return collectChanges().some((change) => change.subtask_id === subtaskId);
+  }
+
+  function revisionRemark(changes) {
+    if (!changes.length) return "初始评测完成";
+    const labels = changes.slice(0, 6).map((change) => `${change.subtask_id} · ${change.field_label}`);
+    return `质检修订：${labels.join("；")}${changes.length > labels.length ? `；另有 ${changes.length - labels.length} 处修改` : ""}`;
+  }
+
+  function buildRevisionHistory(previousAnnotation, revision, changes, now) {
+    const history = previousAnnotation && Array.isArray(previousAnnotation.revision_history)
+      ? clone(previousAnnotation.revision_history)
+      : [];
+    if (!history.length && previousAnnotation && Number(previousAnnotation.result_revision) > 0) {
+      history.push({
+        revision: Number(previousAnnotation.result_revision),
+        updated_at: previousAnnotation.updated_at || previousAnnotation.completed_at || null,
+        remark: previousAnnotation.revision_remark || "历史版本（此前未记录字段级修改明细）",
+        changes: []
+      });
     }
-    const match = state.task.eloMatches[index - state.task.modelCount];
-    return JSON.stringify(state.eloMatches[match.match_id]) !== JSON.stringify(state.baseline.eloMatches[match.match_id]);
+    const entry = {
+      revision,
+      updated_at: now,
+      remark: revisionRemark(changes),
+      changes: clone(changes)
+    };
+    history.push(entry);
+    return { history, entry };
   }
 
   function createAnnotation() {
-    const changeCount = changedCount();
+    const changes = collectChanges();
+    const changeCount = changes.length;
     if (state.loadedHistory && changeCount === 0 && state.task.cells[state.task.resultIndex]) {
       const existing = U.safeJsonParse(state.task.cells[state.task.resultIndex]);
       if (!existing.error && existing.value && existing.value.work_order) return existing.value;
     }
-    const previousRevision = state.loadedHistory && state.task.cells[state.task.resultIndex]
-      ? Number((U.safeJsonParse(state.task.cells[state.task.resultIndex]).value || {}).result_revision) || 1
-      : 0;
+    const previousAnnotation = state.loadedHistory ? state.sourceAnnotation : null;
+    const previousRevision = previousAnnotation ? Number(previousAnnotation.result_revision) || 1 : 0;
+    const resultRevision = previousRevision ? previousRevision + 1 : 1;
     const now = U.nowISO();
+    const revision = buildRevisionHistory(previousAnnotation, resultRevision, changes, now);
     return {
       schema_version: RESULT_SCHEMA,
       work_order_fingerprint: state.task.fingerprint,
@@ -769,23 +851,15 @@
       model_count: state.task.modelCount,
       work_order: workOrderContext(state.task),
       mos: state.task.candidates.map((candidate, index) => {
-        const answer = state.mos[candidate.id];
-        const lowScoreIssues = {};
-        const notes = clone(answer.notes);
-        SUBDIMENSIONS.forEach((dimension) => {
-          const active = answer.scores[dimension.key] <= 3;
-          lowScoreIssues[dimension.key] = active ? clone(answer.low_score_issues[dimension.key] || []) : [];
-          if (!active) notes[dimension.key] = "";
-        });
-        const instructionDeducted = answer.scores[INSTRUCTION_DIMENSION.key] < 5;
+        const answer = effectiveMosAnswer(state.mos[candidate.id]);
         return {
           subtask_id: `MOS-${String(index + 1).padStart(2, "0")}`,
           blind_id: candidate.id,
           scores: clone(answer.scores),
-          low_score_issues: lowScoreIssues,
-          notes,
-          instruction_deductions: instructionDeducted ? clone(answer.instruction_deductions) : [],
-          instruction_note: instructionDeducted ? answer.instruction_note : ""
+          low_score_issues: answer.low_score_issues,
+          notes: answer.notes,
+          instruction_deductions: answer.instruction_deductions,
+          instruction_note: answer.instruction_note
         };
       }),
       elo_matches: state.task.eloMatches.map((match) => ({
@@ -803,7 +877,9 @@
         ? state.sourceAnnotation.completed_at
         : now,
       updated_at: now,
-      result_revision: previousRevision ? previousRevision + (changeCount > 0 ? 1 : 0) : 1
+      result_revision: resultRevision,
+      revision_remark: revision.entry.remark,
+      revision_history: revision.history
     };
   }
 
@@ -850,7 +926,14 @@
       started_at: "2026-08-10T03:20:00.000Z",
       completed_at: "2026-08-10T03:34:00.000Z",
       updated_at: "2026-08-10T03:34:00.000Z",
-      result_revision: 1
+      result_revision: 1,
+      revision_remark: "初始评测完成",
+      revision_history: [{
+        revision: 1,
+        updated_at: "2026-08-10T03:34:00.000Z",
+        remark: "初始评测完成",
+        changes: []
+      }]
     };
   }
 
@@ -975,6 +1058,41 @@
     return date.toLocaleString("zh-CN", { hour12: false });
   }
 
+  function formatAuditValue(value, change) {
+    if (value == null || value === "") return "未填写";
+    if (Array.isArray(value)) return value.length ? value.join("、") : "未选择";
+    if (change && change.scope === "elo" && String(change.field_path || "").startsWith("dimension_results.")) {
+      return { left: "A 胜", draw: "平局", right: "B 胜" }[value] || String(value);
+    }
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    return text.length > 90 ? `${text.slice(0, 87)}…` : text;
+  }
+
+  function renderQualityAudit(history) {
+    const changes = collectChanges();
+    const currentRevision = Number(history && history.result_revision) || 1;
+    const revisionHistory = history && Array.isArray(history.revision_history) ? history.revision_history : [];
+    const changeRows = changes.map((change) => `<li class="quality-change-row">
+      <div class="quality-change-name"><span class="audit-scope audit-scope--${h(change.scope)}">${h(change.subtask_id)}</span><strong>${h(change.field_label)}</strong></div>
+      <div class="quality-change-values"><del title="修改前">${h(formatAuditValue(change.before, change))}</del><span>${icon("arrowRight", 13)}</span><ins title="修改后">${h(formatAuditValue(change.after, change))}</ins></div>
+    </li>`).join("");
+    const historyRows = revisionHistory.map((entry) => `<li><span>Revision ${h(entry.revision)}</span><strong>${h(entry.remark || "未填写版本备注")}</strong><small>${h(formatTimestamp(entry.updated_at))}${Array.isArray(entry.changes) ? ` · ${entry.changes.length} 处字段修改` : ""}</small></li>`).join("");
+    return `<div class="quality-audit-region">
+      <div class="history-banner">${icon("eye", 18)}<div><strong>质检验收模式</strong><span>所有本次修改都会在导出时追加到版本记录。</span></div>${changes.length ? `<span class="modified-note">已修改 ${changes.length} 处</span>` : `<span class="badge success">原结果未修改</span>`}</div>
+      <section class="history-meta" aria-label="历史评测信息">
+        <div><span>开始评测</span><strong>${h(formatTimestamp(history && history.started_at))}</strong></div>
+        <div><span>完成评测</span><strong>${h(formatTimestamp(history && history.completed_at))}</strong></div>
+        <div><span>最近更新</span><strong>${h(formatTimestamp(history && history.updated_at))}</strong></div>
+        <div><span>当前版本</span><strong>Revision ${h(currentRevision)}</strong></div>
+      </section>
+      <section class="quality-change-panel ${changes.length ? "has-changes" : "is-empty"}" aria-label="本次质检修改明细">
+        <div class="quality-change-heading"><div><strong>本次修改明细</strong><small>${changes.length ? `导出后将形成 Revision ${currentRevision + 1}` : "修改评分、问题项或备注后会实时显示在这里"}</small></div><span>${changes.length} 处</span></div>
+        ${changes.length ? `<ul class="quality-change-list">${changeRows}</ul>` : `<div class="quality-change-empty">${icon("checkCircle", 16)} 当前内容与 Revision ${h(currentRevision)} 完全一致</div>`}
+      </section>
+      ${revisionHistory.length ? `<details class="revision-history-panel"><summary>查看历史版本备注 · ${revisionHistory.length} 个 Revision</summary><ol>${historyRows}</ol></details>` : ""}
+    </div>`;
+  }
+
   function renderImport() {
     const draft = lastDraft();
     const qualityMode = state.importMode === "quality";
@@ -1068,7 +1186,7 @@
     </aside>`;
   }
 
-  function renderAudioCard(candidate, label, compact, hideIdentity = false, shortcutKey = "Space") {
+  function renderAudioCard(candidate, label, compact, hideIdentity = false) {
     const identity = hideIdentity
       ? `<div class="identity-veil">${icon("shield", 15)}<span><small>身份已隐藏</small><strong>仅以 A / B 完成本场判断</strong></span></div>`
       : `<div><small>匿名音频 ID</small><strong class="mono">${h(candidate.id)}</strong></div>
@@ -1079,10 +1197,6 @@
         ${identity}
       </div>
       <audio class="audio-player" controls preload="metadata" data-position-memory="${hideIdentity ? "none" : "task"}" src="${h(candidate.url)}" aria-label="${h(label)}音频"></audio>
-      <div class="playback-shortcuts" aria-label="播放器快捷键">
-        <span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>${h(shortcutKey)}</kbd> 播放／暂停</span>
-        ${compact ? "" : `<span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>,</kbd><kbd>.</kbd> 前后 5 秒</span>`}
-      </div>
     </article>`;
   }
 
@@ -1130,7 +1244,7 @@
     const groups = MOS_GROUPS.map((group) => `<section class="mos-group tone-${h(group.tone || "default")}"><div class="mos-group-title"><span>${h(group.label)}</span><small>${group.subdimensions.length} 个子维度 + 1 个整体分</small></div>${group.subdimensions.map((dimension) => renderDimension(candidate.id, dimension, answer, { subdimension: true, groupKey: group.key })).join("")}${renderDimension(candidate.id, group.overall, answer, { overall: true })}</section>`).join("");
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">MOS · ${index + 1}/${state.task.modelCount}</span><h2 class="stage-title">为当前音频完成分层评分</h2></div><span class="stage-state ${mosComplete(candidate.id) ? "is-complete" : ""}">${mosComplete(candidate.id) ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`}</span></div>
-      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false, "Space"))}
+      ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false))}
       <section class="rating-panel layered-rating"><div class="panel-heading"><strong>整体维度与子维度</strong><span>1 很差 · 3 合格 · 5 优秀</span></div>${groups}
         <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>扣分问题多选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
         <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span><small>所有分数均须备注</small></div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
@@ -1145,7 +1259,7 @@
     const answer = state.eloMatches[match.match_id];
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">ELO MATCH · ${matchIndex + 1}/${state.task.eloMatchCount}</span><h2 class="stage-title">从四个维度分别判断胜、平、负</h2></div><span class="stage-state ${eloMatchComplete(match.match_id) ? "is-complete" : ""}">${eloMatchComplete(match.match_id) ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`}</span></div>
-      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true, "1")}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true, "2")}</div><div class="comparison-shortcuts"><span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>Space</kbd> 最近音频播放／暂停</span><span><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>,</kbd><kbd>.</kbd> 前后 5 秒</span><span>切换对战后从 0:00 开始</span></div></div>`)}
+      ${renderStickyContext(`<div class="comparison-stack"><div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true)}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true)}</div><div class="comparison-playback-note">${icon("shield", 13)} 每场对战独立播放；进入其他 ELO 对战后，两侧均从 0:00 开始。</div></div>`)}
       <section class="rating-panel elo-rating">
         <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
         <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
@@ -1178,7 +1292,6 @@
 
   function renderWorkspace() {
     const task = state.task;
-    const changes = changedCount();
     const history = state.sourceAnnotation || {};
     const taskSurface = state.currentIndex < task.modelCount ? renderMosTask(state.currentIndex) : renderEloTask(state.currentIndex - task.modelCount);
     root.innerHTML = `<div class="review-shell">
@@ -1186,13 +1299,7 @@
       <main class="review-workspace">
         <section class="workspace-header">
           <div class="case-header"><div><span class="eyebrow">${h(task.taskBundleId)}</span><h1>${h(task.caseId)}</h1></div><div class="case-meta"><span>${task.modelCount} 模型 · ${task.totalSubtaskCount} 子任务</span><span>${h(task.batchId)}</span><span class="mono">FP ${h(task.fingerprint)}</span></div></div>
-          ${state.loadedHistory ? `<div class="history-banner">${icon("eye", 18)}<div><strong>质检验收模式</strong><span>已恢复完整历史结果，可逐项审核和修订。</span></div>${changes ? `<span class="modified-note">已修改 ${changes} 项</span>` : `<span class="badge success">原结果未修改</span>`}</div>
-          <section class="history-meta" aria-label="历史评测信息">
-            <div><span>开始评测</span><strong>${h(formatTimestamp(history.started_at))}</strong></div>
-            <div><span>完成评测</span><strong>${h(formatTimestamp(history.completed_at))}</strong></div>
-            <div><span>最近更新</span><strong>${h(formatTimestamp(history.updated_at))}</strong></div>
-            <div><span>结果版本</span><strong>Revision ${h(history.result_revision || 1)}</strong></div>
-          </section>` : ""}
+          ${state.loadedHistory ? renderQualityAudit(history) : ""}
           ${state.restoredDraft ? `<div class="history-banner draft-mode">${icon("refresh", 18)}<div><strong>已恢复本地草稿</strong><span>继续上次未完成的位置；最终仍需复制结果回工单。</span></div></div>` : ""}
           ${renderProgressBand()}
         </section>
@@ -1219,7 +1326,7 @@
               <li>${icon("shield", 18)}<span><strong>自包含脱敏任务</strong><small>包含匿名 ID 与音频 URL，但不写入真实模型来源 Mapping</small></span></li>
               <li>${icon("file", 18)}<span><strong class="mono">FP ${h(state.task.fingerprint)}</strong><small>用于回填时检测错行</small></span></li>
             </ul>
-            ${state.loadedHistory ? `<div class="revision-summary"><span>检查修订</span><strong>Revision ${result.result_revision}</strong><small>${changedCount() ? `本次修改 ${changedCount()} 个答案` : "本次未修改原答案"}</small></div>` : ""}
+            ${state.loadedHistory ? `<div class="revision-summary"><span>检查修订</span><strong>Revision ${result.result_revision}</strong><small>${h(result.revision_remark || (changedCount() ? `本次修改 ${changedCount()} 处` : "本次未修改原答案"))}</small></div>` : ""}
           </section>
           <section class="json-card">
             <div class="card-heading"><div><h2>自包含结果 JSON</h2><span>${compact.length.toLocaleString()} characters</span></div><span class="mono">${h(result.schema_version || RESULT_SCHEMA)}</span></div>
@@ -1245,7 +1352,6 @@
     rememberAllAudioPlayback();
     const nextSubtaskKey = currentSubtaskKey();
     const enteredNewSubtask = Boolean(nextSubtaskKey && nextSubtaskKey !== lastRenderedSubtaskKey);
-    if (enteredNewSubtask) lastActiveAudioKey = "";
     const currentRail = typeof root.querySelector === "function" ? root.querySelector(".task-rail") : null;
     if (currentRail) state.railScrollTop = currentRail.scrollTop;
     if (state.screen === "import") renderImport();
@@ -1327,6 +1433,12 @@
     }
     replaceHtml(root.querySelector(".action-bar"), renderActionBar());
     refreshCurrentStageState();
+    refreshQualityAuditRegion();
+  }
+
+  function refreshQualityAuditRegion() {
+    if (!state.loadedHistory) return;
+    replaceHtml(root.querySelector(".quality-audit-region"), renderQualityAudit(state.sourceAnnotation || {}));
   }
 
   function refreshMosDimension(block, candidateId, dimensionKey) {
@@ -1384,6 +1496,15 @@
     render();
   }
 
+  function adoptExportedRevision() {
+    if (!state.loadedHistory || !state.exportResult) return;
+    state.sourceAnnotation = clone(state.exportResult);
+    state.baseline = annotationToAnswers(state.exportResult, state.task);
+    state.task.cells[state.task.resultIndex] = JSON.stringify(state.exportResult);
+    state.exportResult = null;
+    saveDraft();
+  }
+
   function startNewCase() {
     const nextMode = state.workMode === "quality" || state.loadedHistory ? "quality" : "annotate";
     clearLastDraftPointer();
@@ -1404,7 +1525,6 @@
     state.sourceAnnotation = null;
     state.railScrollTop = 0;
     playbackMemory.clear();
-    lastActiveAudioKey = "";
     lastRenderedSubtaskKey = "";
     if (draftSaveTimer != null) {
       window.clearTimeout(draftSaveTimer);
@@ -1419,16 +1539,19 @@
       state.mos[event.target.dataset.id].notes[event.target.dataset.dimension] = event.target.value;
       state.exportResult = null;
       scheduleDraftSave();
+      refreshQualityAuditRegion();
     }
     if (event.target.dataset.role === "instruction-note") {
       state.mos[event.target.dataset.id].instruction_note = event.target.value;
       state.exportResult = null;
       scheduleDraftSave();
+      refreshQualityAuditRegion();
     }
     if (event.target.dataset.role === "elo-note") {
       state.eloMatches[event.target.dataset.match].note = event.target.value;
       state.exportResult = null;
       scheduleDraftSave();
+      refreshQualityAuditRegion();
     }
   });
 
@@ -1440,7 +1563,6 @@
         rememberAudioPlayback(audio);
       }
     });
-    lastActiveAudioKey = audioPlaybackKey(event.target);
     rememberAudioPlayback(event.target);
   }, true);
 
@@ -1453,43 +1575,6 @@
   root.addEventListener("ended", (event) => {
     if (event.target && event.target.tagName === "AUDIO") rememberAudioPlayback(event.target, { reset: true });
   }, true);
-
-  root.addEventListener("keydown", (event) => {
-    if (state.screen !== "task" || event.repeat || event.altKey) return;
-    const hasPrimaryModifier = Boolean(event.metaKey || event.ctrlKey);
-    if (!hasPrimaryModifier || !event.shiftKey) return;
-    const players = currentAudioPlayers();
-    if (!players.length) return;
-    const eloStage = state.currentIndex >= state.task.modelCount;
-    const code = String(event.code || "");
-    let audio = null;
-
-    if (eloStage && (code === "Digit1" || code === "Digit2")) {
-      audio = players[code === "Digit1" ? 0 : 1] || null;
-      if (!audio) return;
-      event.preventDefault();
-      lastActiveAudioKey = audioPlaybackKey(audio);
-      toggleAudioPlayback(audio);
-      return;
-    }
-
-    if (code === "Space") {
-      audio = preferredAudioPlayer();
-      if (!audio) return;
-      event.preventDefault();
-      lastActiveAudioKey = audioPlaybackKey(audio);
-      toggleAudioPlayback(audio);
-      return;
-    }
-
-    if (code === "Comma" || code === "Period") {
-      audio = preferredAudioPlayer();
-      if (!audio) return;
-      event.preventDefault();
-      lastActiveAudioKey = audioPlaybackKey(audio);
-      seekAudioPlayback(audio, code === "Comma" ? -5 : 5);
-    }
-  });
 
   root.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
@@ -1586,6 +1671,7 @@
     if (action === "show-result") return showResult();
     if (action === "new-case") return startNewCase();
     if (action === "back-task") {
+      adoptExportedRevision();
       state.screen = "task";
       return render();
     }
