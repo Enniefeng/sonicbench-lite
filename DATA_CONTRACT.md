@@ -61,6 +61,8 @@
 
 结果回填只替换工单末列，不得改变前置匿名工单字段。质检未修改结果时应保持原结果字节稳定；修改时保留原 `completed_at`，更新 `updated_at`，增加 Revision，并向 `revision_history` 追加一条增量记录，不覆盖旧版本。历史结果没有 `revision_history` 时仍可载入；首次修订会为旧版本补一条“此前未记录字段级明细”的兼容记录。
 
+管理员参考答案对比页接受两份自包含结果 JSON。两份结果的 `batch_id`、`task_bundle_id`、`case_id`、`work_order_fingerprint`、Blind ID 集合以及 ELO 对战左右候选必须一致。管理员发生修订时沿用上述 Revision 规则，并可增加可选的 `admin_quality_review` 对象，记录参考答案 Revision、MOS 容差、修订前后超差数量和 ELO 差异数量。该对象不影响现有评测／质检端读取。
+
 ## 5. 兼容策略
 
 - 接受旧 `sonicbench-work-order/{n}-model/1.0`（n=2–6）工单。

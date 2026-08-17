@@ -563,7 +563,7 @@
     root.innerHTML = `
       <div class="admin-shell">
         <header class="admin-topbar">
-          <a class="brand-lockup" href="admin.html" aria-label="SonicBench Lite 管理工具">
+          <a class="brand-lockup" href="admin-console.html" aria-label="SonicBench Lite 管理员中心">
             <span class="brand-mark">${icon("audio-waveform", 22)}</span>
             <span><strong>SonicBench</strong><small>Evaluation Lite</small></span>
           </a>
@@ -572,7 +572,7 @@
             <span>本地脱敏工作台</span>
             ${statusPill("private", `${icon("shield-check", 14)} 数据仅停留在浏览器`)}
           </div>
-          <div class="topbar-actions"><a class="button button-ghost" href="aggregation.html">${icon("table", 16)} 结果还原与计算</a><a class="button button-ghost" href="index.html">${icon("headphones", 16)} 评测入口</a></div>
+          <div class="topbar-actions"><a class="button button-ghost" href="admin-console.html">${icon("eye", 16)} 结果对比</a><a class="button button-ghost" href="aggregation.html">${icon("table", 16)} 结果还原与计算</a></div>
         </header>
 
         <main class="admin-main">

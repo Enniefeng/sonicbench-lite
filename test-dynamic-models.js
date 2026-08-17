@@ -137,6 +137,8 @@ function testReviewer(line, modelCount) {
   assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
   assert(root.innerHTML.includes("首音频自动播放"), "task header must expose the autoplay preference");
   assert(!root.innerHTML.includes("播放器快捷键"), "reviewer must not expose playback shortcut hints");
+  assert(!root.innerHTML.includes("aggregation.html"), "regular evaluator pages must not expose administrator tools");
+  assert(!root.innerHTML.includes("admin-console.html"), "regular evaluator pages must not expose the administrator center");
   assert(!root._listeners.keydown, "reviewer must not register global keyboard shortcuts");
   assert(!root.innerHTML.includes("为当前音频完成分层评分"), "MOS cards must not repeat the large stage title");
   assert.strictEqual((root.innerHTML.match(/data-action="go-task"/g) || []).length, parsed.task.totalSubtaskCount);
