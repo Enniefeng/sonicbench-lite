@@ -25,6 +25,7 @@
   const STORAGE_PREFIX = "sonicbench-lite-review-draft/flexible-model/1.0/";
   const LAST_DRAFT_KEY = "sonicbench-lite-review-last-draft/flexible-model/1.0";
   const PLAYBACK_PREFERENCE_KEY = "sonicbench-lite-playback-preferences/1.0";
+  const MODEL_COUNT_PREFERENCE_KEY = "sonicbench-lite-model-count-preference/1.0";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
   let lastRenderedSubtaskKey = "";
@@ -47,6 +48,23 @@
     }
   }
 
+  function readModelCountPreference() {
+    try {
+      const value = Number(window.localStorage.getItem(MODEL_COUNT_PREFERENCE_KEY));
+      return isSupportedModelCount(value) ? value : 6;
+    } catch (error) {
+      return 6;
+    }
+  }
+
+  function writeModelCountPreference(modelCount) {
+    try {
+      window.localStorage.setItem(MODEL_COUNT_PREFERENCE_KEY, String(modelCount));
+    } catch (error) {
+      /* The selected model count remains active for this tab. */
+    }
+  }
+
   const state = {
     screen: "import",
     importMode: "annotate",
@@ -64,7 +82,8 @@
     restoredDraft: false,
     sourceAnnotation: null,
     railScrollTop: 0,
-    autoPlayFirstAudio: readAutoPlayPreference()
+    autoPlayFirstAudio: readAutoPlayPreference(),
+    selectedModelCount: 6
   };
 
   function clone(value) {
@@ -143,7 +162,7 @@
     if (!first) return false;
     const playback = first.play();
     if (playback && typeof playback.catch === "function") {
-      playback.catch(() => toast("浏览器阻止了自动播放，可点击播放器或使用组合快捷键继续", "error"));
+      playback.catch(() => toast("浏览器阻止了自动播放，请点击播放器继续", "error"));
     }
     return true;
   }
@@ -158,6 +177,8 @@
       ? D.isSupportedModelCount(value)
       : Number.isInteger(value) && value >= MIN_MODEL_COUNT && value <= MAX_MODEL_COUNT;
   }
+
+  state.selectedModelCount = readModelCountPreference();
 
   function eloMatchCount(modelCount) {
     return typeof D.eloMatchCount === "function" ? D.eloMatchCount(modelCount) : modelCount * (modelCount - 1) / 2;
@@ -183,6 +204,42 @@
       eloKeyIndex: 6 + modelCount * 2,
       resultIndex: 7 + modelCount * 2,
       headers: workOrderHeaders(modelCount)
+    };
+  }
+
+  function contractFromModelCount(modelCount) {
+    return isSupportedModelCount(Number(modelCount)) ? contractFromColumnCount(8 + Number(modelCount) * 2) : null;
+  }
+
+  function looksLikeAnnotationResult(value) {
+    const text = String(value || "").trim();
+    if (!text.startsWith("{")) return false;
+    const parsed = U.safeJsonParse(text);
+    const schema = parsed.value && String(parsed.value.schema_version || "");
+    return !parsed.error && parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value)
+      && (schema.startsWith("sonicbench-annotation-result/") || Array.isArray(parsed.value.mos) || parsed.value.work_order);
+  }
+
+  function canonicalizeWorkOrderRow(row, contract, headerHasResultColumn) {
+    const source = Array.from(row || []);
+    if (source.length < contract.resultIndex) {
+      return { errors: [`${contract.modelCount} 模型工单至少需要前 ${contract.resultIndex} 列（截至 elo_order_key），当前只有 ${source.length} 列`] };
+    }
+    const possibleExtraBlindId = displayCell(source[contract.eloKeyIndex]);
+    const possibleExtraUrl = U.normalizeHttpUrl(displayCell(source[contract.eloKeyIndex + 1]));
+    if (/^(?:R|AU)-[A-Z0-9-]+$/i.test(possibleExtraBlindId) && U.isHttpUrl(possibleExtraUrl)) {
+      return { errors: [`当前选择了 ${contract.modelCount} 个模型，但工单中仍检测到下一组匿名 ID + URL；请把“本批次模型数量”改为实际数量后重试`] };
+    }
+    const candidateResult = source[contract.resultIndex];
+    const hasResultSlot = headerHasResultColumn || candidateResult == null || String(candidateResult).trim() === "" || looksLikeAnnotationResult(candidateResult);
+    const resultCell = hasResultSlot ? String(candidateResult || "") : "";
+    const trailingCells = source.slice(hasResultSlot ? contract.resultIndex + 1 : contract.resultIndex);
+    return {
+      cells: source.slice(0, contract.resultIndex).concat(resultCell),
+      trailingCells,
+      inputColumnCount: source.length,
+      ignoredColumnCount: trailingCells.length,
+      errors: []
     };
   }
 
@@ -460,7 +517,7 @@
       && String(row[0] || "").trim().toLowerCase() === "schema_version";
   }
 
-  function parseWorkOrder(text) {
+  function parseWorkOrder(text, requestedModelCount = state.selectedModelCount) {
     if (!String(text || "").trim()) return { errors: ["请先粘贴一行工单内容"] };
     const parsedTable = U.parseDelimitedDetailed(String(text));
     if (parsedTable.error) return { errors: [parsedTable.error] };
@@ -478,15 +535,22 @@
       dataRow = rows[0];
     }
 
-    const contract = contractFromColumnCount(dataRow.length);
+    const contract = contractFromModelCount(requestedModelCount);
     if (!contract) {
-      return { errors: [`工单列数必须对应 2–6 个模型（12/14/16/18/20 列），当前识别到 ${dataRow.length} 列`] };
+      return { errors: ["请先选择 2–6 之间的模型数量"] };
     }
-    if (headerRow && (headerRow.length !== contract.columnCount || !arraysEqual(headerRow, contract.headers))) {
-      return { errors: [`表头必须严格匹配标准 ${contract.columnCount} 列（${contract.modelCount} 模型）工单格式`] };
+    const expectedPrefixHeaders = contract.headers.slice(0, contract.resultIndex);
+    if (headerRow && !arraysEqual(headerRow.slice(0, contract.resultIndex), expectedPrefixHeaders)) {
+      return { errors: [`表头前 ${contract.resultIndex} 列必须匹配 ${contract.modelCount} 模型工单字段；右侧附加列不受限制`] };
     }
-    dataRow = normalizeWorkOrderUrls(normalizeFlatCells(dataRow, contract.resultIndex), contract);
+    const headerHasResultColumn = Boolean(headerRow && String(headerRow[contract.resultIndex] || "").trim() === "annotation_result_json");
+    const canonical = canonicalizeWorkOrderRow(dataRow, contract, headerHasResultColumn);
+    if (canonical.errors.length) return { errors: canonical.errors };
+    dataRow = normalizeWorkOrderUrls(normalizeFlatCells(canonical.cells, contract.resultIndex), contract);
     const task = buildTask(dataRow);
+    task.trailingCells = canonical.trailingCells;
+    task.inputColumnCount = canonical.inputColumnCount;
+    task.ignoredColumnCount = canonical.ignoredColumnCount;
     const errors = validateTask(task);
     let annotation = null;
     const annotationText = String(dataRow[task.resultIndex] || "").trim();
@@ -593,6 +657,7 @@
       started_at: state.startedAt,
       baseline: state.baseline,
       loaded_history: state.loadedHistory,
+      trailing_cells: state.task.trailingCells || [],
       updated_at: U.nowISO()
     };
     const key = draftKey(state.task);
@@ -937,25 +1002,19 @@
     };
   }
 
-  function demoEmptyCells() {
-    let row = Array.isArray(D.REVIEW_SAMPLE_ROW) ? D.REVIEW_SAMPLE_ROW.slice() : [];
-    if (!contractFromColumnCount(row.length)) {
-      row = [
-        WORK_ORDER_SCHEMA, "BATCH-DEMO-01", "TASK-DEMO-0007", "CASE-0007",
-        "温暖 R&B，男声，92 BPM，雨夜氛围", "玻璃窗上的雨，替我说出没有寄出的信",
-        "AU-7KQ2MX", "https://example.com/audio/case-0007-x1.mp3",
-        "AU-B9T4NP", "https://example.com/audio/case-0007-x2.mp3",
-        "AU-P3V8LC", "https://example.com/audio/case-0007-x3.mp3",
-        "AU-H6R1WF", "https://example.com/audio/case-0007-x4.mp3",
-        "AU-D4N7ZQ", "https://example.com/audio/case-0007-x5.mp3",
-        "AU-X8C5J2", "https://example.com/audio/case-0007-x6.mp3",
-        "K-DEMO-7KQ2-MX9H-4V8C", ""
-      ];
+  function demoEmptyCells(modelCount = state.selectedModelCount) {
+    const sample = Array.isArray(D.REVIEW_SAMPLE_ROW) ? D.REVIEW_SAMPLE_ROW : [];
+    const row = [
+      WORK_ORDER_SCHEMA, sample[1] || "BATCH-DEMO-01", sample[2] || "TASK-DEMO-0007", sample[3] || "CASE-0007",
+      sample[4] || "温暖 R&B，男声，92 BPM，雨夜氛围", sample[5] || "玻璃窗上的雨，替我说出没有寄出的信"
+    ];
+    for (let index = 0; index < modelCount; index += 1) {
+      row.push(
+        sample[6 + index * 2] || `R-DEMO-${String(index + 1).padStart(2, "0")}`,
+        sample[7 + index * 2] || `https://example.com/audio/case-demo-${index + 1}.mp3`
+      );
     }
-    row[0] = WORK_ORDER_SCHEMA;
-    const contract = contractFromColumnCount(row.length);
-    if (!row[contract.eloKeyIndex]) row[contract.eloKeyIndex] = "K-DEMO-7KQ2-MX9H-4V8C";
-    row[contract.resultIndex] = "";
+    row.push(`K-DEMO-${modelCount}M-7KQ2-MX9H`, "");
     return row;
   }
 
@@ -968,7 +1027,7 @@
       cells[task.resultIndex] = JSON.stringify(completeAnnotationForDemo(task));
     }
     state.pasteText = U.serializeTSVRow(cells);
-    const parsed = parseWorkOrder(state.pasteText);
+    const parsed = parseWorkOrder(state.pasteText, state.selectedModelCount);
     if (parsed.errors.length) {
       state.errors = parsed.errors;
       render();
@@ -1015,12 +1074,15 @@
     }
     const cells = draft.sanitized_cells.slice(0, contract.resultIndex).concat("");
     const task = buildTask(cells);
+    task.trailingCells = Array.isArray(draft.trailing_cells) ? draft.trailing_cells.slice() : [];
     const errors = validateTask(task);
     if (errors.length || !validDraft(draft, task)) {
       toast("本地草稿已损坏或与当前格式不兼容", "error");
       return;
     }
     state.pasteText = U.serializeTSVRow(cells);
+    state.selectedModelCount = contract.modelCount;
+    writeModelCountPreference(contract.modelCount);
     loadTask(task, null);
   }
 
@@ -1102,7 +1164,7 @@
         <section class="import-hero">
           <span class="eyebrow">FLEXIBLE 2–6 MODELS · ANNOTATE · QUALITY REVIEW</span>
           <h1>${qualityMode ? "载入结果，完成质检验收" : "一行工单，完成一组盲评"}</h1>
-          <p>${qualityMode ? "直接粘贴新版自包含结果 JSON，自动恢复 2–6 个匿名音频、历史评分和时间记录。" : "粘贴动态列数工单行，支持 CSV 或从 Excel 直接复制。系统会自动识别 2–6 个匿名音频，并生成 n 项 MOS 与 C(n,2) 项随机 ELO 对战。"}</p>
+          <p>${qualityMode ? "直接粘贴新版自包含结果 JSON，自动恢复 2–6 个匿名音频、历史评分和时间记录。" : "先选择本批次的模型数量，再粘贴 CSV 或从 Excel 直接复制工单行。系统按所选数量读取匿名音频，并生成 n 项 MOS 与 C(n,2) 项随机 ELO 对战。"}</p>
           <div class="import-task-summary" aria-label="每个 Case 包含 n 项 MOS 与 C(n,2) 项 ELO，共 3 至 21 个子任务">
             <span class="task-summary-item"><b>n</b><span><strong>MOS</strong><small>每个候选 1 项</small></span></span>
             <i aria-hidden="true">+</i>
@@ -1117,15 +1179,16 @@
         </section>` : ""}
         <section class="import-card">
           <div class="mode-switch" role="tablist" aria-label="工作模式">
-            <button class="mode-option ${qualityMode ? "" : "is-active"}" data-action="set-import-mode" data-mode="annotate" role="tab" aria-selected="${!qualityMode}"><strong>标注模式</strong><span>粘贴 12–20 列脱敏工单</span></button>
+            <button class="mode-option ${qualityMode ? "" : "is-active"}" data-action="set-import-mode" data-mode="annotate" role="tab" aria-selected="${!qualityMode}"><strong>标注模式</strong><span>选择 2–6 个模型并粘贴工单</span></button>
             <button class="mode-option ${qualityMode ? "is-active" : ""}" data-action="set-import-mode" data-mode="quality" role="tab" aria-selected="${qualityMode}"><strong>质检验收模式</strong><span>直接粘贴自包含结果 JSON</span></button>
           </div>
+          ${qualityMode ? "" : `<div class="model-count-setting"><div><strong>本批次模型数量</strong><span>选择一次后会保存在当前浏览器，后续默认保持不变。</span></div><div class="model-count-options" role="radiogroup" aria-label="模型数量">${Array.from({ length: MAX_MODEL_COUNT - MIN_MODEL_COUNT + 1 }, (_, offset) => MIN_MODEL_COUNT + offset).map((count) => `<button type="button" data-action="set-model-count" data-count="${count}" role="radio" aria-checked="${state.selectedModelCount === count}" class="${state.selectedModelCount === count ? "is-selected" : ""}">${count} 个模型</button>`).join("")}</div></div>`}
           <div class="card-heading">
             <div><span class="step-number">01</span><h2>${qualityMode ? "粘贴评测结果 JSON" : "粘贴 Excel 工单行"}</h2></div>
-            <span class="column-badge">${qualityMode ? "自包含 JSON" : "动态 12–20 列"}</span>
+            <span class="column-badge">${qualityMode ? "自包含 JSON" : `${state.selectedModelCount} 模型 · 前 ${7 + state.selectedModelCount * 2} 列必需`}</span>
           </div>
           <label class="sr-only" for="work-order-input">${qualityMode ? "结果 JSON" : "CSV 或 Excel 工单行"}</label>
-          <textarea id="work-order-input" class="paste-area" rows="9" placeholder="${qualityMode ? "粘贴包含 work_order、mos、elo_matches 与时间信息的完整结果 JSON。" : "在 Excel 中从 schema_version 到 annotation_result_json 选择一行，按 Command+C，然后粘贴到这里。"}">${h(state.pasteText)}</textarea>
+          <textarea id="work-order-input" class="paste-area" rows="9" placeholder="${qualityMode ? "粘贴包含 work_order、mos、elo_matches 与时间信息的完整结果 JSON。" : "在 Excel 中复制一行工单后粘贴到这里；右侧评审员、分配或备注等附加列不会影响解析。"}">${h(state.pasteText)}</textarea>
           ${renderErrors()}
           <div class="import-actions">
             <div class="demo-actions">
@@ -1136,7 +1199,7 @@
         </section>
         <section class="import-footnote">
           ${icon("info", 16)}
-          <span>${qualityMode ? "新版结果 JSON 自带脱敏后的音频 ID 与 URL，不包含管理员模型 Mapping；旧版纯评分 JSON 需改用完整工单载入。" : "支持仅数据行，或“标准表头 + 1 条数据”。系统从列数自动识别模型数量；若末列已有结果，将自动进入质检验收模式。"}</span>
+          <span>${qualityMode ? "新版结果 JSON 自带脱敏后的音频 ID 与 URL，不包含管理员模型 Mapping；旧版纯评分 JSON 需改用完整工单载入。" : `当前按 ${state.selectedModelCount} 模型读取必要字段。annotation_result_json 可省略；其右侧增加的评审员、分配或备注列会被忽略，不影响进入标注。`}</span>
         </section>
       </main>
     </div>`;
@@ -1599,8 +1662,18 @@
       state.errors = [];
       return render();
     }
+    if (action === "set-model-count") {
+      const count = Number(target.dataset.count);
+      if (!isSupportedModelCount(count)) return;
+      state.selectedModelCount = count;
+      writeModelCountPreference(count);
+      state.errors = [];
+      render();
+      toast(`已固定为 ${count} 模型工单；下次打开仍保持该选择`, "success");
+      return;
+    }
     if (action === "parse-input") {
-      const parsed = state.importMode === "quality" ? parseResultJson(state.pasteText) : parseWorkOrder(state.pasteText);
+      const parsed = state.importMode === "quality" ? parseResultJson(state.pasteText) : parseWorkOrder(state.pasteText, state.selectedModelCount);
       state.errors = parsed.errors || [];
       if (state.errors.length) return render();
       return loadTask(parsed.task, parsed.annotation, { workMode: state.importMode });
@@ -1679,11 +1752,11 @@
       return U.copyText(JSON.stringify(state.exportResult)).then(() => toast("结果 JSON 已复制", "success")).catch(() => toast("复制失败，请从预览区手动复制", "error"));
     }
     if (action === "copy-row") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult));
-      return U.copyText(U.serializeTSVRow(cells)).then(() => toast(`完整 ${state.task.columnCount} 列工单行已复制，可粘贴回 Excel`, "success")).catch(() => toast("复制失败，请改用结果 JSON", "error"));
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
+      return U.copyText(U.serializeTSVRow(cells)).then(() => toast(`结果行已复制${(state.task.trailingCells || []).length ? "，右侧附加信息已保留" : ""}`, "success")).catch(() => toast("复制失败，请改用结果 JSON", "error"));
     }
     if (action === "download-row-csv") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult));
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
       U.downloadText(
         `${U.fileSafe(state.task.caseId)}-completed-work-order.csv`,
         `\uFEFF${U.serializeCSVRow(cells)}`,

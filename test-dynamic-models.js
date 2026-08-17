@@ -105,15 +105,21 @@ function testReviewer(line, modelCount) {
   const { context, root } = makeContext("review-app");
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
-    "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision"
+    "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
+    "readModelCountPreference", "writeModelCountPreference"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
   assert(root.innerHTML.includes("3–21</b>"), "review import must keep the task range on one semantic value");
+  api.writeModelCountPreference(modelCount);
+  assert.strictEqual(api.readModelCountPreference(), modelCount, "model-count preference must persist in localStorage");
+  api.state.selectedModelCount = modelCount;
+  api.render();
+  assert(root.innerHTML.includes(`${modelCount} 个模型`), "import screen must render the selected model count");
   const lineCells = context.SB_UTILS.parseDelimitedDetailed(line).rows[0];
   const rawUrl = lineCells[7];
   lineCells[7] = `[${rawUrl}](${rawUrl})`;
-  const parsed = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(lineCells));
+  const parsed = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(lineCells), modelCount);
   assert.deepStrictEqual(Array.from(parsed.errors), [], `${modelCount} model reviewer errors`);
   assert.strictEqual(parsed.task.candidates[0].url, rawUrl, "reviewer must unwrap Markdown URLs before playback");
   assert.strictEqual(context.SB_UTILS.decodeFlatText(parsed.task.cells[7]), rawUrl, "canonical work order must retain the raw URL");
@@ -121,6 +127,33 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(parsed.task.eloMatchCount, modelCount * (modelCount - 1) / 2);
   assert.strictEqual(parsed.task.totalSubtaskCount, modelCount * (modelCount + 1) / 2);
   assert.strictEqual(new Set(parsed.task.eloMatches.map((match) => [match.left_id, match.right_id].sort().join("::"))).size, parsed.task.eloMatchCount);
+
+  const withoutResultCell = lineCells.slice(0, -1);
+  const parsedWithoutResult = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(withoutResultCell), modelCount);
+  assert.deepStrictEqual(Array.from(parsedWithoutResult.errors), [], "trailing empty result cell must be optional");
+  assert.strictEqual(parsedWithoutResult.task.fingerprint, parsed.task.fingerprint, "optional result cell must not change the work-order fingerprint");
+
+  const withTrailingMetadata = lineCells.concat("reviewer@example.com", "分配备注", "非工单字段");
+  const parsedWithTrailingMetadata = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(withTrailingMetadata), modelCount);
+  assert.deepStrictEqual(Array.from(parsedWithTrailingMetadata.errors), [], "right-side metadata after the result slot must be ignored by validation");
+  assert.deepStrictEqual(Array.from(parsedWithTrailingMetadata.task.trailingCells), ["reviewer@example.com", "分配备注", "非工单字段"]);
+  assert.strictEqual(parsedWithTrailingMetadata.task.fingerprint, parsed.task.fingerprint, "right-side metadata must not change the work-order fingerprint");
+
+  const withoutResultButWithMetadata = withoutResultCell.concat("reviewer-01", "验收备注");
+  const parsedWithoutResultButWithMetadata = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(withoutResultButWithMetadata), modelCount);
+  assert.deepStrictEqual(Array.from(parsedWithoutResultButWithMetadata.errors), [], "metadata may immediately follow elo_order_key when result JSON is absent");
+  assert.deepStrictEqual(Array.from(parsedWithoutResultButWithMetadata.task.trailingCells), ["reviewer-01", "验收备注"]);
+  assert.strictEqual(parsedWithoutResultButWithMetadata.task.fingerprint, parsed.task.fingerprint);
+
+  const businessJson = JSON.stringify({ schema_version: "assignment-metadata/1.0", reviewer: "reviewer-02" });
+  const parsedWithBusinessJson = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(withoutResultCell.concat(businessJson)), modelCount);
+  assert.deepStrictEqual(Array.from(parsedWithBusinessJson.errors), [], "an unrelated JSON business column must not be mistaken for annotation_result_json");
+  assert.deepStrictEqual(Array.from(parsedWithBusinessJson.task.trailingCells), [businessJson]);
+
+  if (modelCount > 2) {
+    const wrongCount = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(lineCells), modelCount - 1);
+    assert(wrongCount.errors.some((error) => error.includes("本批次模型数量")), "a lower selected count must report the model-count mismatch instead of silently dropping a candidate");
+  }
 
   const annotation = api.completeAnnotationForDemo(parsed.task);
   assert.strictEqual(annotation.model_count, modelCount);
