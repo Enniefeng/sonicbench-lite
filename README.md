@@ -9,10 +9,9 @@ SonicBench Lite 是一个在浏览器中运行的音乐生成模型盲评工具�
 | 使用入口 | 适用角色 | 功能 |
 | --- | --- | --- |
 | [评测与质检工作台](https://enniefeng.github.io/sonicbench-lite/) | 评测员、质检员 | 导入单条脱敏工单，完成 MOS、ELO 评分或复核历史结果 |
-| [管理员工作台](https://enniefeng.github.io/sonicbench-lite/admin.html) | 评测管理员 | 导入原始 CSV，随机脱敏并导出评测工单和 Mapping |
-| [结果回算工作台](https://enniefeng.github.io/sonicbench-lite/aggregation.html) | 评测管理员 | 将回收结果映射回真实模型，计算 MOS 和 ELO |
+| 管理员中心（入口由项目负责人受控分发） | 评测管理员 | 参考答案对比与修订、脱敏工单生成、Mapping 还原及指标回算 |
 
-> 在线页面是纯静态应用。输入内容不会上传到 SonicBench Lite 的服务器，但音频播放仍会访问 URL 所在的音频服务器。
+> 在线页面是纯静态应用。输入内容不会上传到 SonicBench Lite 的服务器，但音频播放仍会访问 URL 所在的音频服务器。普通评测页面不提供任何管理员入口；静态页面的未公开链接并不等于真正鉴权，敏感场景应使用私有部署或登录保护。
 
 ## 工作流程
 
@@ -45,7 +44,7 @@ SonicBench Lite 是一个在浏览器中运行的音乐生成模型盲评工具�
 1. 下载并打开 [管理员 Excel 模板](templates/SonicBench-flexible-2-6-model-admin-import-template.xlsx)。
 2. 根据本次模型数量选择对应 Sheet，填写 Case 信息和 2–6 个模型的音频 URL。
 3. 将 Sheet 另存为 **CSV UTF-8（逗号分隔）**。
-4. 打开[管理员工作台](https://enniefeng.github.io/sonicbench-lite/admin.html)，上传 CSV 并执行校验。
+4. 从项目负责人处获取管理员中心入口，进入“脱敏工单生成”，上传 CSV 并执行校验。
 5. 生成后立即下载：
    - **脱敏工单 CSV**：发送给评测员或质检员。
    - **Mapping JSON**：只由管理员保存，不得发送给评测员。
@@ -109,6 +108,16 @@ MOS 当前包含音乐性、音质与声学表现、Vocals、指令遵循和总�
 
 默认 ELO 初始分为 1500、K 值为 32、平局为 0.5。由于 ELO 具有顺序依赖性，正式批次应固定结果输入顺序和计算参数。
 
+### 5. 评测管理员：参考答案对比与验收修订
+
+1. 在管理员中心选择“参考答案对比”。
+2. 左侧粘贴参考答案的自包含结果 JSON，右侧粘贴标注员的自包含结果 JSON。
+3. 选择 MOS 容差：默认 ±2 分，也可以切换为 ±1 分。系统会拒绝 Case、工单指纹、匿名音频或 ELO 对战不一致的两份结果。
+4. 逐候选查看每个 MOS 维度的参考分、标注分、差值和辅助结论；展开“依据与备注”可同时查看参考答案与标注员的问题标签、扣分项和备注。
+5. ELO 只显示一致或差异，不自动判退；结合音频和本场备注人工判断。
+6. 如需纠正，可直接修改 MOS、问题标签、备注或 ELO 结果。导出时会保留原 `completed_at`，增加 Revision，并把字段级变化追加到 `revision_history`。
+7. 可分别导出修订后的结果 JSON，以及不含源模型 Mapping 的对比报告 JSON。
+
 ## 数据与隐私
 
 - **Mapping JSON 是敏感文件**：它包含 Blind ID 与真实模型来源的对应关系，只能由管理员保存。
@@ -149,6 +158,7 @@ python3 -m http.server 8765
 然后访问：
 
 - `http://127.0.0.1:8765/admin.html`
+- `http://127.0.0.1:8765/admin-console.html`
 - `http://127.0.0.1:8765/index.html`
 - `http://127.0.0.1:8765/aggregation.html`
 

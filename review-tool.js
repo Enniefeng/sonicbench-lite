@@ -1030,7 +1030,7 @@
         <span class="brand-symbol">${icon("headphones", 19)}</span>
         <span><strong>SonicBench 2–6M</strong><small>动态多模型匿名评测任务卡</small></span>
       </div>
-      <div class="topbar-actions">${extra || ""}<a class="button ghost" href="aggregation.html">${icon("table", 15)} 管理员回算</a><span class="privacy-chip">${icon("shield", 15)} 仅处理脱敏工单</span></div>
+      <div class="topbar-actions">${extra || ""}<span class="privacy-chip">${icon("shield", 15)} 仅处理脱敏工单</span></div>
     </header>`;
   }
 
