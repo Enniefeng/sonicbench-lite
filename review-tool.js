@@ -1676,7 +1676,9 @@
       const parsed = state.importMode === "quality" ? parseResultJson(state.pasteText) : parseWorkOrder(state.pasteText, state.selectedModelCount);
       state.errors = parsed.errors || [];
       if (state.errors.length) return render();
-      return loadTask(parsed.task, parsed.annotation, { workMode: state.importMode });
+      // A manually pasted row is authoritative. Local answers are restored only
+      // through the explicit "恢复草稿" action on the import screen.
+      return loadTask(parsed.task, parsed.annotation, { workMode: state.importMode, skipDraft: true });
     }
     if (action === "change-order") {
       if (state.task && progress().total > 0 && !window.confirm("当前进度已自动保存在本机。确定返回并粘贴另一条工单吗？")) return;

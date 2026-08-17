@@ -106,7 +106,7 @@ function testReviewer(line, modelCount) {
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
     "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
-    "readModelCountPreference", "writeModelCountPreference"
+    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -161,6 +161,26 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(annotation.elo_matches.length, parsed.task.eloMatchCount);
   assert.strictEqual(annotation.total_subtask_count, parsed.task.totalSubtaskCount);
   assert.deepStrictEqual(Array.from(api.validateAnnotation(annotation, parsed.task)), []);
+
+  api.loadTask(parsed.task, annotation, { skipDraft: true, workMode: "quality" });
+  assert.strictEqual(api.state.loadedHistory, true, "a pasted result must load its explicit history");
+  api.state.screen = "import";
+  api.state.importMode = "annotate";
+  api.state.pasteText = context.SB_UTILS.serializeTSVRow(lineCells.slice(0, -1));
+  api.render();
+  const parseTarget = { dataset: { action: "parse-input" }, closest(selector) { return selector === "[data-action]" ? this : null; } };
+  root._listeners.click[0]({ target: parseTarget });
+  assert.strictEqual(api.state.loadedHistory, false, "a manually pasted empty work order must not inherit cached history");
+  assert.strictEqual(api.state.restoredDraft, false, "manual paste must never be reported as draft recovery");
+  assert.strictEqual(api.state.mos[parsed.task.candidates[0].id].scores.melody, null, "manual empty input must open a blank scorecard");
+
+  api.state.mos[parsed.task.candidates[0].id].scores.melody = 4;
+  api.saveDraft();
+  api.state.screen = "import";
+  api.render();
+  api.resumeLastDraft();
+  assert.strictEqual(api.state.restoredDraft, true, "the explicit recovery action must still restore a valid local draft");
+  assert.strictEqual(api.state.mos[parsed.task.candidates[0].id].scores.melody, 4, "explicit recovery must restore saved answers");
 
   const quality = api.parseResultJson(JSON.stringify(annotation));
   assert.deepStrictEqual(Array.from(quality.errors), [], `${modelCount} model self-contained JSON errors`);
