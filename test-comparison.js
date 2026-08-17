@@ -17,6 +17,8 @@ vm.createContext(context);
 ["utils.js", "shared-data.js", "comparison-tool.js"].forEach((file) => vm.runInContext(fs.readFileSync(path.join(base, file), "utf8"), context, { filename: file }));
 
 const api = context.__SB_COMPARISON_TEST__;
+api.makeDemo();
+assert(root.innerHTML.includes("TASK-DEMO-COMPARE"), "demo loader must render valid reference and annotator JSON");
 const dimensions = context.SB_SHARED_DATA.MOS_DIMENSIONS;
 const eloDimensions = context.SB_SHARED_DATA.ELO_DIMENSIONS;
 const ids = ["R-TEST-A", "R-TEST-B"];
