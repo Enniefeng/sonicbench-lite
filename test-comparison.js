@@ -5,10 +5,19 @@ const path = require("path");
 const vm = require("vm");
 
 const base = __dirname;
+let downloadedFilename = "";
 const root = { innerHTML: "", addEventListener() {}, querySelector() { return null; } };
+const canvasContext = new Proxy({ measureText(value) { return { width: String(value).length * 7 }; } }, { get(target, key) { return key in target ? target[key] : () => {}; }, set(target, key, value) { target[key] = value; return true; } });
 const context = {
   console, URL, Blob, setTimeout, clearTimeout,
-  document: { getElementById(id) { return id === "comparison-app" ? root : null; } },
+  document: {
+    getElementById(id) { return id === "comparison-app" ? root : null; },
+    createElement(tag) {
+      if (tag === "canvas") return { width: 0, height: 0, getContext() { return canvasContext; }, toBlob(callback) { callback(new Blob(["png"], { type: "image/png" })); } };
+      return { href: "", set download(value) { downloadedFilename = value; }, click() {}, remove() {} };
+    },
+    body: { appendChild() {} }
+  },
   navigator: {},
   SB_UI: { escapeHtml(value) { return String(value == null ? "" : value); }, icon() { return ""; }, toast() {} }
 };
@@ -36,6 +45,7 @@ function annotation() {
 const reference = annotation();
 const candidate = annotation();
 candidate.mos[0].scores.melody = 3;
+candidate.mos[0].low_score_issues.melody = ["主旋律难以分辨"];
 candidate.mos[1].scores.audio_quality = 1;
 candidate.elo_matches[0].dimension_results.overall = "right";
 assert.deepStrictEqual(Array.from(api.validatePair(reference, candidate)), []);
@@ -50,6 +60,23 @@ assert.strictEqual(strict.metrics.outliers, 1);
 candidate.mos[0].scores.melody = 2;
 assert.strictEqual(api.compare(reference, candidate, 1).metrics.outliers, 2, "two-point difference must exceed a ±1 policy");
 assert(api.collectChanges(reference, candidate).some((change) => change.field_path === "scores.melody"));
+
+api.state.reference = JSON.parse(JSON.stringify(reference));
+api.state.original = JSON.parse(JSON.stringify(candidate));
+api.state.editable = JSON.parse(JSON.stringify(candidate));
+api.state.initial = api.compare(api.state.reference, api.state.original, api.state.tolerance);
+api.state.selectedBlindId = ids[0];
+api.state.expanded.add(`${ids[0]}:melody`);
+api.state.screen = "compare";
+api.render();
+assert(root.innerHTML.includes("下载对比长图 PNG"), "comparison page must provide a PNG long-image export");
+assert(!root.innerHTML.includes('data-action="download-report"'), "the primary report download must no longer be JSON");
+assert(root.innerHTML.includes("主旋律难以分辨"), "comparison editor must reuse the evaluator's exact low-score options");
+assert(root.innerHTML.includes("旋律听感生硬/不顺/杂乱"), "comparison editor must expose the full evaluator option set");
+assert.strictEqual(typeof api.downloadComparisonImage, "function", "PNG export must be testable as a first-class action");
+const imageDownload = api.downloadComparisonImage();
+assert(imageDownload && typeof imageDownload.then === "function", "PNG export must return an asynchronous completion signal");
+assert.strictEqual(downloadedFilename, "comparison-CASE-TEST.png", "PNG export must use a clear Case-based filename");
 
 const wrongCase = annotation(); wrongCase.work_order_fingerprint = "wrong";
 assert(api.validatePair(reference, wrongCase).some((error) => error.includes("work_order_fingerprint")), "different work orders must be rejected");

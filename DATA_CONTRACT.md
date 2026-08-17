@@ -38,7 +38,9 @@
 8. `elo_order_key`
 9. `annotation_result_json`
 
-总列数为 `8 + 2n`。初始导出时结果末列为空。管理员对每个 Case 独立安全洗牌；Blind ID 在批次内唯一；Mapping 单独导出且不得进入评测工单。
+标准总列数为 `8 + 2n`。初始导出时结果末列为空。管理员对每个 Case 独立安全洗牌；Blind ID 在批次内唯一；Mapping 单独导出且不得进入评测工单。
+
+评测端不再用粘贴行的物理总列数推断 `n`，而是读取评测员明确选择且缓存在本地的模型数量。解析时，`schema_version` 到 `elo_order_key` 是必要标准前缀；初始为空的 `annotation_result_json` 可以省略。标准结果列右侧允许附加评审员、工单分配、备注等任意业务列：这些列不参与工单校验、候选识别或指纹计算，并在复制／下载回填行时按原值保留。若所选 `n` 后仍出现一组 Blind ID + HTTP(S) URL，必须提示模型数量不匹配，禁止静默把候选当作附加列丢弃。
 
 原始模型 URL 与脱敏工单 URL 均接受纯 HTTP(S) 地址，或 Markdown 链接格式 `[显示文本](https://...)`。解析器必须先将 Markdown 链接规范化为括号内的纯 URL，再执行合法性校验、重复检测、脱敏导出、指纹计算与音频播放。规范化后的 Mapping、工单及结果 JSON 不保留 Markdown 包装。
 
@@ -49,7 +51,7 @@
 新结果 Schema：`sonicbench-annotation-result/flexible-model/1.0`。顶层必须包含：
 
 - `model_count`：2–6，且等于 `work_order.candidates.length`。
-- `work_order_fingerprint`：由结果列之前的所有物理列计算。
+- `work_order_fingerprint`：仅由标准前缀（`schema_version` 到 `elo_order_key`）计算；结果列和右侧业务附加列均不参与。
 - `batch_id`、`task_bundle_id`、`case_id`。
 - `work_order`：脱敏上下文、n 个匿名候选与 `elo_order_key`。
 - `mos`：恰好 n 项，与候选槽位对齐。
@@ -59,16 +61,16 @@
 - `revision_remark`：当前版本的简短修改摘要。
 - `revision_history`：按 Revision 递增的版本记录。每个条目包含 `revision`、`updated_at`、`remark` 和本轮增量 `changes`；每条 Change 记录子任务、字段路径、维度及修改前后值。
 
-结果回填只替换工单末列，不得改变前置匿名工单字段。质检未修改结果时应保持原结果字节稳定；修改时保留原 `completed_at`，更新 `updated_at`，增加 Revision，并向 `revision_history` 追加一条增量记录，不覆盖旧版本。历史结果没有 `revision_history` 时仍可载入；首次修订会为旧版本补一条“此前未记录字段级明细”的兼容记录。
+结果回填只写入标准 `annotation_result_json` 槽位，不得改变前置匿名工单字段；原输入右侧业务附加列原样跟随。质检未修改结果时应保持原结果字节稳定；修改时保留原 `completed_at`，更新 `updated_at`，增加 Revision，并向 `revision_history` 追加一条增量记录，不覆盖旧版本。历史结果没有 `revision_history` 时仍可载入；首次修订会为旧版本补一条“此前未记录字段级明细”的兼容记录。
 
-管理员参考答案对比页接受两份自包含结果 JSON。两份结果的 `batch_id`、`task_bundle_id`、`case_id`、`work_order_fingerprint`、Blind ID 集合以及 ELO 对战左右候选必须一致。管理员发生修订时沿用上述 Revision 规则，并可增加可选的 `admin_quality_review` 对象，记录参考答案 Revision、MOS 容差、修订前后超差数量和 ELO 差异数量。该对象不影响现有评测／质检端读取。
+管理员参考答案对比页接受两份自包含结果 JSON。两份结果的 `batch_id`、`task_bundle_id`、`case_id`、`work_order_fingerprint`、Blind ID 集合以及 ELO 对战左右候选必须一致。管理员发生修订时沿用上述 Revision 规则，并可增加可选的 `admin_quality_review` 对象，记录参考答案 Revision、MOS 容差、修订前后超差数量和 ELO 差异数量。问题／扣分项必须直接复用评测端的 `LOW_SCORE_OPTIONS` 与 `INSTRUCTION_DEDUCTION_OPTIONS`，不得维护第二套自由文本标签。管理员还可生成不含真实模型 Mapping 的 PNG 对比长图；该图片是验收辅助材料，不替代可计算的 JSON 结果。
 
 ## 5. 兼容策略
 
 - 接受旧 `sonicbench-work-order/{n}-model/1.0`（n=2–6）工单。
 - 接受现行六模型 `sonicbench-annotation-result/6-model/2.0` 历史结果。早期 4/5 模型结果维度不同，必须重新标注或由单独迁移脚本处理，不做有损自动转换。
 - 新导出一律使用 flexible Schema。
-- 物理列数、候选数、`model_count` 或历史结果数量不一致时必须拒绝载入。
+- 标准前缀字段不足、所选模型数与候选数不一致、`model_count` 或历史结果数量不一致时必须拒绝载入；仅在标准字段右侧增加业务附加列不得导致拒绝。
 
 ## 6. 管理员还原与聚合报告
 

@@ -61,6 +61,8 @@
 .evidence-panel textarea { width: 100%; min-height: 62px; margin-top: 6px; padding: 9px 10px; border: 1px solid #ddd7e4; border-radius: 9px; resize: vertical; font: 11px/1.5 inherit; }
 .elo-note-field { width: 100%; min-width: 190px; min-height: 62px; padding: 8px 9px; border: 1px solid #ddd7e4; border-radius: 9px; resize: vertical; font: 11px/1.45 inherit; }
 .evidence-label { display: block; margin-top: 8px; color: #716a7b; font-size: 10px; font-weight: 800; }
+.comparison-issue-chips { margin-top: 7px; }
+.comparison-issue-chips .issue-chip { min-height: 30px; padding: 5px 8px; font-size: 10px; }
 .compare-toolbar { flex-wrap: wrap; }
 .edit-count { color: #6b6475; font-size: 11px; }
 .result-actions { position: sticky; bottom: 12px; z-index: 5; margin-top: 18px; padding: 13px 14px; border: 1px solid #ded8e6; border-radius: 14px; background: rgba(255,255,255,.96); box-shadow: 0 12px 30px rgba(49,35,73,.12); backdrop-filter: blur(12px); }

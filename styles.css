@@ -475,6 +475,14 @@ to{opacity:1;transform:translateY(0);}
 
 /* Annotation / quality-review mode selector */
 .mode-switch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:22px;padding:6px;border:1px solid var(--line);border-radius:16px;background:#f8f4f9;}
+.model-count-setting{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 16px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:#fbfaff;}
+.model-count-setting>div:first-child{display:grid;gap:3px;}
+.model-count-setting strong{color:var(--ink-800);font-size:12px;}
+.model-count-setting span{color:var(--ink-500);font-size:10px;line-height:1.45;}
+.model-count-options{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;}
+.model-count-options button{min-width:66px;min-height:34px;padding:6px 9px;border:1px solid var(--line-strong);border-radius:8px;background:var(--white);color:var(--ink-650);font-size:10px;font-weight:700;cursor:pointer;}
+.model-count-options button:hover{border-color:rgba(112,87,217,.36);color:var(--violet-strong);}
+.model-count-options button.is-selected{border-color:var(--violet);background:var(--violet);color:var(--white);box-shadow:0 6px 14px rgba(112,87,217,.2);}
 .mode-option{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid transparent;border-radius:12px;background:transparent;color:#715d75;text-align:left;cursor:pointer;}
 .mode-option strong{color:#35253a;font-size:14px;}
 .mode-option span{font-size:12px;}
@@ -485,7 +493,7 @@ to{opacity:1;transform:translateY(0);}
 .history-meta span{color:#806e84;font-size:11px;}
 .history-meta strong{color:#3b2940;font-size:12px;font-weight:650;}
 @media (max-width:820px){.history-meta{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@media (max-width:540px){.mode-switch,.history-meta{grid-template-columns:1fr;}}
+@media (max-width:540px){.mode-switch,.history-meta{grid-template-columns:1fr;}.model-count-setting{align-items:stretch;flex-direction:column}.model-count-options{justify-content:flex-start}.model-count-options button{flex:1 1 72px}}
 
 /* Layered MOS rubric */
 .layered-rating{display:flex;flex-direction:column;gap:16px;background:transparent;border:0;padding:0;}
