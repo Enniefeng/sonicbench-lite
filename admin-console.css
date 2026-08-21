@@ -33,6 +33,16 @@
 .summary-card.is-good { border-color: #bfe1d4; background: #f5fcf9; }
 .recommendation { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 14px; background: #eef9f4; color: #177455; font-size: 13px; font-weight: 800; }
 .recommendation.needs-review { background: #fff3f3; color: #a23d43; }
+.comparison-audio-section { margin-top: 16px; padding: 20px; }
+.comparison-audio-section .section-title { margin-bottom: 12px; }
+.export-exclusion-note { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 6px 9px; border-radius: 999px; background: #f2eff6; color: #756e80; font-size: 10px; font-weight: 750; }
+.comparison-audio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 10px; }
+.comparison-audio-item { min-width: 0; padding: 12px; border: 1px solid #e5e0ea; border-radius: 13px; background: linear-gradient(135deg, #fff, #faf8ff); }
+.comparison-audio-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.comparison-audio-meta span { color: #7054dc; font-size: 11px; font-weight: 800; }
+.comparison-audio-meta strong { min-width: 0; overflow: hidden; color: #5d5667; font: 600 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.comparison-audio-player { display: block; width: 100%; height: 38px; accent-color: #7054dc; }
+.comparison-audio-unavailable { display: flex; min-height: 38px; align-items: center; padding: 0 11px; border-radius: 9px; background: #f5f3f7; color: #8a8293; font-size: 10px; }
 .comparison-section { margin-top: 16px; padding: 20px; }
 .section-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .candidate-tabs, .filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -69,4 +79,4 @@
 .result-actions .button { white-space: nowrap; }
 .admin-note { margin: 14px 0 0; color: #827a8d; font-size: 10px; line-height: 1.6; }
 @media (max-width: 900px) { .comparison-main { width: min(100% - 24px, 1480px); padding-top: 22px; } .comparison-hero { align-items: flex-start; flex-direction: column; } .json-grid, .evidence-grid { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .comparison-main { width: calc(100% - 16px); } .comparison-import, .comparison-section { padding: 15px; } .import-head, .import-actions, .section-title, .result-actions { align-items: stretch; flex-direction: column; } .json-field textarea { min-height: 230px; } .summary-grid { grid-template-columns: 1fr 1fr; } .result-actions { bottom: 6px; } }
+@media (max-width: 560px) { .comparison-main { width: calc(100% - 16px); } .comparison-import, .comparison-section, .comparison-audio-section { padding: 15px; } .import-head, .import-actions, .section-title, .result-actions { align-items: stretch; flex-direction: column; } .json-field textarea { min-height: 230px; } .summary-grid { grid-template-columns: 1fr 1fr; } .comparison-audio-grid { grid-template-columns: 1fr; } .result-actions { bottom: 6px; } }

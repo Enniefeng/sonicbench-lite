@@ -36,7 +36,7 @@ function annotation() {
     schema_version: context.SB_SHARED_DATA.REVIEW_SCHEMA,
     work_order_fingerprint: "same-fingerprint",
     batch_id: "BATCH-TEST", task_bundle_id: "TASK-TEST", case_id: "CASE-TEST", model_count: 2,
-    work_order: { candidates: ids.map((blind_id, index) => ({ slot: index + 1, blind_id, url: `https://example.com/${index}.mp3` })) },
+    work_order: { candidates: ids.map((blind_id, index) => ({ slot: index + 1, blind_id, url: index ? `[https://example.com/${index}.mp3](https://example.com/${index}.mp3)` : `https://example.com/${index}.mp3` })) },
     mos: ids.map((blind_id, index) => ({ subtask_id: `MOS-0${index + 1}`, blind_id, scores: Object.fromEntries(dimensions.map((dimension) => [dimension.key, 4])), low_score_issues: {}, notes: {}, instruction_deductions: [], instruction_note: "" })),
     elo_matches: [{ subtask_id: "ELO-01", left_blind_id: ids[0], right_blind_id: ids[1], dimension_results: Object.fromEntries(eloDimensions.map((dimension) => [dimension.key, "left"])), note: "" }]
   };
@@ -70,6 +70,11 @@ api.state.expanded.add(`${ids[0]}:melody`);
 api.state.screen = "compare";
 api.render();
 assert(root.innerHTML.includes("下载对比长图 PNG"), "comparison page must provide a PNG long-image export");
+assert(root.innerHTML.includes("Case 音频试听"), "comparison page must provide a dedicated case audio panel");
+assert(root.innerHTML.includes('class="comparison-audio-player"'), "valid candidate URLs must render playable audio controls");
+assert(root.innerHTML.includes('data-export-exclude="true"'), "the audio panel must be explicitly excluded from visual report content");
+assert(root.innerHTML.includes("https://example.com/0.mp3"), "the audio player must use the self-contained work-order URL");
+assert(root.innerHTML.includes('src="https://example.com/1.mp3"'), "Markdown-wrapped audio URLs must be normalized before playback");
 assert(!root.innerHTML.includes('data-action="download-report"'), "the primary report download must no longer be JSON");
 assert(root.innerHTML.includes("主旋律难以分辨"), "comparison editor must reuse the evaluator's exact low-score options");
 assert(root.innerHTML.includes("旋律听感生硬/不顺/杂乱"), "comparison editor must expose the full evaluator option set");
