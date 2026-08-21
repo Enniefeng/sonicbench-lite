@@ -29,6 +29,14 @@
     if (list.length) return list.map((item, index) => ({ blind_id: item.blind_id || item.id, url: item.url || "", slot: item.slot || index + 1 }));
     return (annotation.mos || []).map((item, index) => ({ blind_id: item.blind_id, url: "", slot: index + 1 }));
   }
+  function renderAudioPanel(candidateList) {
+    const items = candidateList.map((candidate, index) => {
+      const rawUrl = U.normalizeHttpUrl ? U.normalizeHttpUrl(candidate.url) : String(candidate.url || "").trim();
+      const playable = U.isHttpUrl ? U.isHttpUrl(rawUrl) : /^https?:\/\//i.test(rawUrl);
+      return `<article class="comparison-audio-item"><div class="comparison-audio-meta"><span>候选 ${String(index + 1).padStart(2, "0")}</span><strong>${h(candidate.blind_id)}</strong></div>${playable ? `<audio class="comparison-audio-player" controls preload="metadata" src="${h(rawUrl)}" aria-label="候选 ${index + 1} 音频"></audio>` : `<div class="comparison-audio-unavailable">未找到有效的 HTTP(S) 音频 URL</div>`}</article>`;
+    }).join("");
+    return `<section class="comparison-card comparison-audio-section" data-export-exclude="true"><div class="section-title"><div><h2>Case 音频试听</h2><p>试听当前 Case 的匿名候选音频；开始播放另一条时，上一条会自动暂停并保留位置。</p></div><span class="export-exclusion-note">${icon("eye", 13)} 不进入对比长图</span></div><div class="comparison-audio-grid">${items}</div></section>`;
+  }
   function parseJson(text, label) {
     const parsed = U.safeJsonParse ? U.safeJsonParse(text) : (() => { try { return { value: JSON.parse(text), error: null }; } catch (error) { return { value: null, error }; } })();
     if (parsed.error || !parsed.value || typeof parsed.value !== "object") return { error: `${label}不是有效 JSON` };
@@ -189,6 +197,8 @@
     const result = compare(state.reference,state.editable,state.tolerance); const metrics = result.metrics; const edits = collectChanges(state.original,state.editable);
     const candidateList = candidates(state.editable); if (!state.selectedBlindId && candidateList.length) state.selectedBlindId = candidateList[0].blind_id;
     root.innerHTML = `<div class="comparison-shell">${header()}<main class="comparison-main"><section class="comparison-hero"><div><p class="comparison-eyebrow">${h(state.editable.case_id)} · ${h(state.editable.task_bundle_id)}</p><h1>验收辅助判断</h1><p>MOS 超出 ±${state.tolerance} 分时进入人工复核；备注和低分问题在每一行展开查看。ELO 差异不会自动导致不通过。</p></div>${suiteNav()}</section><div class="compare-toolbar"><div class="button-row"><button class="button button-ghost" data-action="back-import">${icon("arrowLeft",15)} 更换结果</button><label class="tolerance-control">MOS 容差<select data-role="tolerance"><option value="1" ${state.tolerance===1?"selected":""}>±1 分</option><option value="2" ${state.tolerance===2?"selected":""}>±2 分</option></select></label></div><span class="edit-count" data-edit-count>管理员已修改 ${edits.length} 个字段</span></div><div class="summary-grid"><div class="summary-card"><span>MOS 对比项</span><strong>${metrics.total}</strong></div><div class="summary-card is-good"><span>完全一致</span><strong>${metrics.exact}</strong></div><div class="summary-card"><span>容差内差异</span><strong>${metrics.acceptable}</strong></div><div class="summary-card ${metrics.outliers?"is-danger":"is-good"}"><span>超出容差</span><strong>${metrics.outliers}</strong></div><div class="summary-card"><span>ELO 一致</span><strong>${metrics.eloSame}/${metrics.eloTotal}</strong></div></div><div class="recommendation ${metrics.outliers?"needs-review":""}">${icon(metrics.outliers?"warning":"checkCircle",18)} ${metrics.outliers?`有 ${metrics.outliers} 个 MOS 项需结合备注人工复核`:`未发现超出 MOS 容差的评分，建议通过`}</div><section class="comparison-card comparison-section"><div class="section-title"><div><h2>MOS 分层对比</h2><p>参考分固定；标注分、问题标签和备注均可直接修订。</p></div><div class="filter-tabs"><button data-filter="all" class="${state.filter==="all"?"is-active":""}">全部</button><button data-filter="different" class="${state.filter==="different"?"is-active":""}">有差异</button><button data-filter="outlier" class="${state.filter==="outlier"?"is-active":""}">仅需复核</button></div></div><div class="candidate-tabs">${candidateList.map((item,index)=>`<button data-candidate="${h(item.blind_id)}" class="${item.blind_id===state.selectedBlindId?"is-active":""}">候选 ${String(index+1).padStart(2,"0")}</button>`).join("")}</div><div class="comparison-table-wrap" style="margin-top:12px"><table class="comparison-table"><thead><tr><th>维度</th><th>参考分</th><th>标注分</th><th>差值</th><th>辅助判断</th><th>证据</th></tr></thead><tbody>${renderMosRows(result)}</tbody></table></div></section><section class="comparison-card comparison-section"><div class="section-title"><div><h2>ELO 结果对比</h2><p>胜/平/负差异只作信息提示，不参与自动判退；可直接修订标注结果。</p></div></div><div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th>对战</th><th>维度</th><th>参考答案</th><th>标注结果</th><th>提示</th></tr></thead><tbody>${renderEloRows(result)}</tbody></table></div></section><div class="result-actions"><div><strong>${metrics.outliers?"建议人工复核":"建议通过"}</strong><div class="edit-count">修订将写入新的 Revision，原完成时间保留。</div></div><div class="button-row"><button class="button button-ghost" data-action="copy-report">${icon("copy",14)} 复制结构化报告 JSON</button><button class="button button-ghost" data-action="download-image">${icon("download",14)} 下载对比长图 PNG</button><button class="button button-primary" data-action="copy-result">${icon("copy",14)} 复制修订结果 JSON</button><button class="button button-primary" data-action="download-result">${icon("download",14)} 下载修订结果</button></div></div></main></div>`;
+    const mosSectionMarker = '<section class="comparison-card comparison-section"><div class="section-title"><div><h2>MOS 分层对比</h2>';
+    root.innerHTML = root.innerHTML.replace(mosSectionMarker, `${renderAudioPanel(candidateList)}${mosSectionMarker}`);
   }
   function render() { state.screen === "compare" ? renderCompare() : renderImport(); }
   function setNestedText(target, role) {
@@ -216,6 +226,11 @@
     if(role==="mos-score") { const item=mosMap(state.editable).get(target.dataset.blind); if(item){item.scores[target.dataset.dimension]=Number(target.value);render();} }
     if(role==="elo-outcome") { const item=eloMap(state.editable).get(target.dataset.match); if(item){item.dimension_results=item.dimension_results||{};item.dimension_results[target.dataset.dimension]=target.value;render();} }
   });
+  root.addEventListener("play", (event) => {
+    const active = event.target;
+    if (!active || !active.classList || !active.classList.contains("comparison-audio-player")) return;
+    root.querySelectorAll(".comparison-audio-player").forEach((audio) => { if (audio !== active) audio.pause(); });
+  }, true);
   root.addEventListener("click", async (event) => {
     const target=event.target.closest("button,[data-candidate],[data-filter]"); if(!target)return;
     const action=target.dataset.action;
