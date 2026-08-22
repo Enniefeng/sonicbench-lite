@@ -63,6 +63,16 @@ function makeContext(appId) {
   return { context, root };
 }
 
+{
+  const { context } = makeContext("unused-app");
+  const options = Array.from(context.SB_SHARED_DATA.INSTRUCTION_DEDUCTION_OPTIONS);
+  assert(options.includes("心情/情绪未遵循"), "instruction options must use the expanded mood/emotion label");
+  assert(options.includes("段落结构未遵循"), "instruction options must include paragraph structure");
+  assert(options.includes("歌词演唱未遵循"), "instruction options must include lyric singing");
+  assert(!options.includes("心情未遵循"), "the legacy mood label must not remain selectable");
+  assert.deepStrictEqual(Array.from(context.SB_SHARED_DATA.normalizeInstructionDeductions(["心情未遵循"])), ["心情/情绪未遵循"]);
+}
+
 function instrument(file, exportName, exports) {
   const source = fs.readFileSync(path.join(base, file), "utf8");
   const marker = "\n  render();\n})();";

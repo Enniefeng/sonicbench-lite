@@ -6,17 +6,30 @@ const vm = require("vm");
 
 const base = __dirname;
 let downloadedFilename = "";
-const root = { innerHTML: "", addEventListener() {}, querySelector() { return null; } };
+let audioDockRenderCount = 0;
+const body = { appendChild() {}, insertBefore(node) { node.parentNode = body; } };
+const root = {
+  innerHTML: "", addEventListener() {}, querySelector(selector) {
+    if (selector !== "[data-audio-dock-anchor]" || !this.innerHTML.includes("data-audio-dock-anchor")) return null;
+    return { replaceWith(node) { node.parentNode = root; root.innerHTML = root.innerHTML.replace('<div data-audio-dock-anchor></div>', node.innerHTML); } };
+  }
+};
+const audioDock = {
+  _innerHTML: "", hidden: true, dataset: {}, parentNode: body,
+  get innerHTML() { return this._innerHTML; },
+  set innerHTML(value) { this._innerHTML = value; audioDockRenderCount += 1; },
+  querySelectorAll() { return []; }
+};
 const canvasContext = new Proxy({ measureText(value) { return { width: String(value).length * 7 }; } }, { get(target, key) { return key in target ? target[key] : () => {}; }, set(target, key, value) { target[key] = value; return true; } });
 const context = {
   console, URL, Blob, setTimeout, clearTimeout,
   document: {
-    getElementById(id) { return id === "comparison-app" ? root : null; },
+    getElementById(id) { return id === "comparison-app" ? root : id === "comparison-audio-dock" ? audioDock : null; },
     createElement(tag) {
       if (tag === "canvas") return { width: 0, height: 0, getContext() { return canvasContext; }, toBlob(callback) { callback(new Blob(["png"], { type: "image/png" })); } };
       return { href: "", set download(value) { downloadedFilename = value; }, click() {}, remove() {} };
     },
-    body: { appendChild() {} }
+    body
   },
   navigator: {},
   SB_UI: { escapeHtml(value) { return String(value == null ? "" : value); }, icon() { return ""; }, toast() {} }
@@ -75,6 +88,9 @@ assert(root.innerHTML.includes('class="comparison-audio-player"'), "valid candid
 assert(root.innerHTML.includes('data-export-exclude="true"'), "the audio panel must be explicitly excluded from visual report content");
 assert(root.innerHTML.includes("https://example.com/0.mp3"), "the audio player must use the self-contained work-order URL");
 assert(root.innerHTML.includes('src="https://example.com/1.mp3"'), "Markdown-wrapped audio URLs must be normalized before playback");
+const stableAudioRenderCount = audioDockRenderCount;
+api.render();
+assert.strictEqual(audioDockRenderCount, stableAudioRenderCount, "comparison updates must reuse the existing audio DOM instead of rebuilding players");
 assert(!root.innerHTML.includes('data-action="download-report"'), "the primary report download must no longer be JSON");
 assert(root.innerHTML.includes("主旋律难以分辨"), "comparison editor must reuse the evaluator's exact low-score options");
 assert(root.innerHTML.includes("旋律听感生硬/不顺/杂乱"), "comparison editor must expose the full evaluator option set");
@@ -85,5 +101,17 @@ assert.strictEqual(downloadedFilename, "comparison-CASE-TEST.png", "PNG export m
 
 const wrongCase = annotation(); wrongCase.work_order_fingerprint = "wrong";
 assert(api.validatePair(reference, wrongCase).some((error) => error.includes("work_order_fingerprint")), "different work orders must be rejected");
+const wrongAudio = annotation(); wrongAudio.work_order.candidates[0].url = "https://example.com/different.mp3";
+assert(api.validatePair(reference, wrongAudio).some((error) => error.includes("R-TEST-A 的音频 URL 不一致")), "candidate audio URLs must match exactly across both answers");
+const wrongCaseInfo = annotation(); wrongCaseInfo.work_order.tag = "different case prompt";
+assert(api.validatePair(reference, wrongCaseInfo).some((error) => error.includes("Case 的 tag 信息不一致")), "case source information must match across both answers");
 assert(root.innerHTML.includes("管理员专用"), "administrator page must identify its restricted purpose");
+assert(root.innerHTML.includes("继续对比下一份"), "comparison result must provide a direct batch-comparison continuation action");
+const preservedReference = api.state.referenceText;
+api.state.candidateText = JSON.stringify(candidate);
+api.prepareNextComparison();
+assert.strictEqual(api.state.referenceText, preservedReference, "batch continuation must preserve the reference answer");
+assert.strictEqual(api.state.candidateText, "", "batch continuation must clear only the annotator answer");
+assert.strictEqual(api.state.screen, "import", "batch continuation must return to the comparison import screen");
+assert(root.innerHTML.includes("已保留 · 验收基准"), "the import screen must clearly indicate that the reference answer was retained");
 console.log("Administrator reference comparison regression passed.");
