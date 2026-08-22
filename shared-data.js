@@ -57,7 +57,11 @@
     singing_performance: ["音准不稳/跑调", "节奏不稳/落点不准", "气息不足/支撑差", "咬字吐字不清/发音不顺", "断句或重音处理不当", "语流不自然/唱感拧巴", "技巧失控或处理生硬", "稳定性不足/句间波动大", "其他"],
     emotional_expression: ["情绪方向错误/与词曲不符", "情感空洞/无感染力", "起伏层次不足", "关键句或副歌推进不成立", "情绪转折生硬", "表达过度或失真", "高潮拉不开/整体偏平", "其他"]
   };
-  const INSTRUCTION_DEDUCTION_OPTIONS = ["曲风未遵循", "速度/节奏未遵循", "人声未遵循", "配器未遵循", "心情未遵循", "主题未遵循", "场景未遵循", "其他"];
+  const INSTRUCTION_DEDUCTION_OPTIONS = ["曲风未遵循", "速度/节奏未遵循", "段落结构未遵循", "人声未遵循", "歌词演唱未遵循", "配器未遵循", "心情/情绪未遵循", "主题未遵循", "场景未遵循", "其他"];
+  function normalizeInstructionDeductions(values) {
+    const aliases = { "心情未遵循": "心情/情绪未遵循" };
+    return Array.from(new Set((Array.isArray(values) ? values : []).map((value) => aliases[value] || value)));
+  }
   const MIN_MODEL_COUNT = 2;
   const MAX_MODEL_COUNT = 6;
   const WORK_ORDER_SCHEMA = "sonicbench-work-order/flexible-model/1.0";
@@ -150,6 +154,7 @@
       ELO_DIMENSIONS,
       LOW_SCORE_OPTIONS,
       INSTRUCTION_DEDUCTION_OPTIONS,
+      normalizeInstructionDeductions,
       MIN_MODEL_COUNT,
       MAX_MODEL_COUNT,
       REVIEW_SAMPLE_ROW,

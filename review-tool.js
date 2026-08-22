@@ -19,6 +19,7 @@
   const ELO_DIMENSIONS = Array.isArray(D.ELO_DIMENSIONS) ? D.ELO_DIMENSIONS : [];
   const LOW_SCORE_OPTIONS = D.LOW_SCORE_OPTIONS || {};
   const INSTRUCTION_DEDUCTION_OPTIONS = Array.isArray(D.INSTRUCTION_DEDUCTION_OPTIONS) ? D.INSTRUCTION_DEDUCTION_OPTIONS : [];
+  const normalizeInstructionDeductions = D.normalizeInstructionDeductions || ((values) => Array.isArray(values) ? values : []);
   const SUBDIMENSIONS = MOS_GROUPS.flatMap((group) => group.subdimensions || []);
   const GROUP_OVERALL_DIMENSIONS = MOS_GROUPS.map((group) => group.overall).filter(Boolean);
   const SCORE_CAPTIONS = { 1: "很差", 2: "较差", 3: "合格", 4: "良好", 5: "优秀" };
@@ -499,7 +500,7 @@
         scores: clone(item.scores || {}),
         low_score_issues: clone(item.low_score_issues || {}),
         notes: clone(item.notes || {}),
-        instruction_deductions: clone(item.instruction_deductions || []),
+        instruction_deductions: clone(normalizeInstructionDeductions(item.instruction_deductions)),
         instruction_note: item.instruction_note || ""
       };
     });
@@ -719,6 +720,7 @@
       const draft = readStorage(draftKey(task));
       if (validDraft(draft, task)) {
         state.mos = clone(draft.mos);
+        Object.values(state.mos).forEach((answer) => { answer.instruction_deductions = normalizeInstructionDeductions(answer.instruction_deductions); });
         state.eloMatches = clone(draft.elo_matches);
         state.currentIndex = Math.max(0, Math.min(task.totalSubtaskCount - 1, Number(draft.current_index) || 0));
         state.startedAt = draft.started_at || state.startedAt;
@@ -1309,7 +1311,7 @@
       <div class="stage-heading"><div><span class="stage-kicker">MOS · ${index + 1}/${state.task.modelCount}</span></div><span class="stage-state ${mosComplete(candidate.id) ? "is-complete" : ""}">${mosComplete(candidate.id) ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`}</span></div>
       ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false))}
       <section class="rating-panel layered-rating"><div class="panel-heading"><strong>整体维度与子维度</strong><span>1 很差 · 3 合格 · 5 优秀</span></div>${groups}
-        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>扣分问题多选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
+        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>未遵循项勾选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
         <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span><small>所有分数均须备注</small></div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
       </section>
     </section>`;

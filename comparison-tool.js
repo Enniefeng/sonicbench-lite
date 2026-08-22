@@ -4,6 +4,7 @@
   const UI = window.SB_UI || {};
   const root = document.getElementById("comparison-app");
   if (!root) return;
+  const audioDock = document.getElementById("comparison-audio-dock");
 
   const dimensions = Array.isArray(D.MOS_DIMENSIONS) ? D.MOS_DIMENSIONS : [];
   const eloDimensions = Array.isArray(D.ELO_DIMENSIONS) ? D.ELO_DIMENSIONS : [];
@@ -37,9 +38,34 @@
     }).join("");
     return `<section class="comparison-card comparison-audio-section" data-export-exclude="true"><div class="section-title"><div><h2>Case 音频试听</h2><p>试听当前 Case 的匿名候选音频；开始播放另一条时，上一条会自动暂停并保留位置。</p></div><span class="export-exclusion-note">${icon("eye", 13)} 不进入对比长图</span></div><div class="comparison-audio-grid">${items}</div></section>`;
   }
+  function candidateSignature(candidateList) {
+    return JSON.stringify(candidateList.map((candidate) => [candidate.blind_id, U.normalizeHttpUrl ? U.normalizeHttpUrl(candidate.url) : String(candidate.url || "").trim()]));
+  }
+  function parkAudioDock(reset) {
+    if (!audioDock) return;
+    if (audioDock.parentNode !== document.body) document.body.insertBefore(audioDock, root);
+    if (!reset) return;
+    audioDock.querySelectorAll("audio").forEach((audio) => audio.pause());
+    audioDock.innerHTML = "";
+    audioDock.hidden = true;
+    delete audioDock.dataset.signature;
+  }
+  function mountAudioDock(candidateList) {
+    if (!audioDock) return false;
+    const signature = candidateSignature(candidateList);
+    if (audioDock.dataset.signature !== signature) {
+      audioDock.innerHTML = renderAudioPanel(candidateList);
+      audioDock.dataset.signature = signature;
+    }
+    audioDock.hidden = false;
+    const anchor = root.querySelector("[data-audio-dock-anchor]");
+    if (anchor) anchor.replaceWith(audioDock);
+    return true;
+  }
   function parseJson(text, label) {
     const parsed = U.safeJsonParse ? U.safeJsonParse(text) : (() => { try { return { value: JSON.parse(text), error: null }; } catch (error) { return { value: null, error }; } })();
     if (parsed.error || !parsed.value || typeof parsed.value !== "object") return { error: `${label}不是有效 JSON` };
+    (parsed.value.mos || []).forEach((item) => { item.instruction_deductions = D.normalizeInstructionDeductions ? D.normalizeInstructionDeductions(item.instruction_deductions) : (item.instruction_deductions || []); });
     return { value: parsed.value };
   }
   function validateAnnotation(value, label) {
@@ -47,6 +73,13 @@
     if (!Array.isArray(value.mos) || !value.mos.length) errors.push(`${label}缺少 MOS 结果`);
     if (!Array.isArray(value.elo_matches)) errors.push(`${label}缺少 ELO 结果`);
     if (!value.work_order || !Array.isArray(value.work_order.candidates)) errors.push(`${label}必须是包含 work_order 的自包含结果 JSON`);
+    const seenCandidates = new Set();
+    candidates(value).forEach((candidate, index) => {
+      if (!candidate.blind_id) errors.push(`${label}候选 ${index + 1} 缺少匿名音频 ID`);
+      else if (seenCandidates.has(candidate.blind_id)) errors.push(`${label}匿名音频 ID ${candidate.blind_id} 重复`);
+      seenCandidates.add(candidate.blind_id);
+      if (!(U.isHttpUrl ? U.isHttpUrl(candidate.url) : /^https?:\/\//i.test(String(candidate.url || "").trim()))) errors.push(`${label} ${candidate.blind_id || `候选 ${index + 1}`} 的音频 URL 无效`);
+    });
     (value.mos || []).forEach((item) => dimensions.forEach((dimension) => {
       const score = scoreOf(item, dimension.key);
       if (!Number.isInteger(score) || score < 1 || score > 5) errors.push(`${label} ${item.subtask_id || item.blind_id} 的${dimension.label}评分无效`);
@@ -57,6 +90,21 @@
     const errors = validateAnnotation(reference, "参考答案").concat(validateAnnotation(candidate, "标注结果"));
     ["batch_id", "task_bundle_id", "case_id", "work_order_fingerprint"].forEach((key) => {
       if (String(reference[key] || "") !== String(candidate[key] || "")) errors.push(`${key} 不一致，不能对比不同工单`);
+    });
+    if ((reference.model_count != null || candidate.model_count != null) && Number(reference.model_count) !== Number(candidate.model_count)) errors.push("model_count 不一致，不能对比不同数量的候选音频");
+    ["tag", "caption", "lyrics", "sp", "spp"].forEach((key) => {
+      const refValue = reference.work_order && reference.work_order[key];
+      const candidateValue = candidate.work_order && candidate.work_order[key];
+      if (String(refValue == null ? "" : refValue) !== String(candidateValue == null ? "" : candidateValue)) errors.push(`Case 的 ${key} 信息不一致`);
+    });
+    const refCandidates = new Map(candidates(reference).map((item) => [item.blind_id, item]));
+    const candidateCandidates = new Map(candidates(candidate).map((item) => [item.blind_id, item]));
+    refCandidates.forEach((refItem, blindId) => {
+      const candidateItem = candidateCandidates.get(blindId);
+      if (!candidateItem) return;
+      const refUrl = U.normalizeHttpUrl ? U.normalizeHttpUrl(refItem.url) : String(refItem.url || "").trim();
+      const candidateUrl = U.normalizeHttpUrl ? U.normalizeHttpUrl(candidateItem.url) : String(candidateItem.url || "").trim();
+      if (refUrl !== candidateUrl) errors.push(`${blindId} 的音频 URL 不一致`);
     });
     const refMos = mosMap(reference); const candMos = mosMap(candidate);
     if (refMos.size !== candMos.size) errors.push("候选音频数量不一致");
@@ -171,7 +219,8 @@
   }
   function suiteNav() { return `<nav class="admin-suite-nav" aria-label="管理员工具"><a class="suite-link is-current" href="admin-console.html">${icon("eye",14)} 参考答案对比</a><a class="suite-link" href="admin.html">${icon("shuffle",14)} 脱敏工单生成</a><a class="suite-link" href="aggregation.html">${icon("table",14)} Mapping 与指标回算</a><a class="suite-link" href="index.html" target="_blank">${icon("external",14)} 打开评测端</a></nav>`; }
   function renderImport() {
-    root.innerHTML = `<div class="comparison-shell">${header()}<main class="comparison-main"><section class="comparison-hero"><div><p class="comparison-eyebrow">Quality acceptance workspace</p><h1>结果对比与修订</h1><p>将同一工单的参考答案 JSON 与标注员结果 JSON 并排校验。MOS 使用可配置容差辅助验收；ELO 差异只作提示，并结合备注人工判断。</p></div>${suiteNav()}</section><section class="comparison-card comparison-import"><div class="import-head"><div><h2>导入两份自包含结果 JSON</h2><p>系统会校验 Case、指纹、匿名音频及 ELO 对战是否完全对应。</p></div><button class="button button-ghost" data-action="load-demo">${icon("eye",15)} 加载演示数据</button></div><div class="json-grid"><div class="json-field"><label>参考答案 JSON <span>验收基准</span></label><textarea data-role="reference" spellcheck="false" placeholder="粘贴参考答案的完整自包含 JSON">${h(state.referenceText)}</textarea></div><div class="json-field"><label>标注员 JSON <span>待验收与可修订结果</span></label><textarea data-role="candidate" spellcheck="false" placeholder="粘贴标注员提交的完整自包含 JSON">${h(state.candidateText)}</textarea></div></div>${state.errors.length ? `<div class="comparison-alert"><strong>暂时无法开始对比</strong><ul>${state.errors.map((error) => `<li>${h(error)}</li>`).join("")}</ul></div>` : ""}<div class="import-actions"><label class="tolerance-control">MOS 可接受偏差<select data-role="tolerance"><option value="1" ${state.tolerance===1?"selected":""}>±1 分</option><option value="2" ${state.tolerance===2?"selected":""}>±2 分</option></select></label><div class="button-row"><button class="button button-primary" data-action="analyze">开始对比 ${icon("arrowRight",15)}</button></div></div><p class="admin-note">访问隔离说明：本页面不从普通评测页暴露，并设置 noindex；若需要真正的权限隔离，请部署在带登录鉴权的私有站点或受控网络中。</p></section></main></div>`;
+    parkAudioDock(true);
+    root.innerHTML = `<div class="comparison-shell">${header()}<main class="comparison-main"><section class="comparison-hero"><div><p class="comparison-eyebrow">Quality acceptance workspace</p><h1>结果对比与修订</h1><p>将同一工单的参考答案 JSON 与标注员结果 JSON 并排校验。MOS 使用可配置容差辅助验收；ELO 差异只作提示，并结合备注人工判断。</p></div>${suiteNav()}</section><section class="comparison-card comparison-import"><div class="import-head"><div><h2>导入两份自包含结果 JSON</h2><p>系统会校验 Case、指纹、匿名音频及 ELO 对战是否完全对应。</p></div><button class="button button-ghost" data-action="load-demo">${icon("eye",15)} 加载演示数据</button></div><div class="json-grid"><div class="json-field"><label>参考答案 JSON <span>${state.referenceText.trim() ? "已保留 · 验收基准" : "验收基准"}</span></label><textarea data-role="reference" spellcheck="false" placeholder="粘贴参考答案的完整自包含 JSON">${h(state.referenceText)}</textarea></div><div class="json-field"><label>标注员 JSON <span>待验收与可修订结果</span></label><textarea data-role="candidate" spellcheck="false" placeholder="粘贴标注员提交的完整自包含 JSON">${h(state.candidateText)}</textarea></div></div>${state.errors.length ? `<div class="comparison-alert"><strong>暂时无法开始对比</strong><ul>${state.errors.map((error) => `<li>${h(error)}</li>`).join("")}</ul></div>` : ""}<div class="import-actions"><label class="tolerance-control">MOS 可接受偏差<select data-role="tolerance"><option value="1" ${state.tolerance===1?"selected":""}>±1 分</option><option value="2" ${state.tolerance===2?"selected":""}>±2 分</option></select></label><div class="button-row"><button class="button button-primary" data-action="analyze">开始对比 ${icon("arrowRight",15)}</button></div></div><p class="admin-note">批量验收时可在对比结果页点击“继续对比下一份”：系统会保留参考答案，只清空标注员结果。访问隔离说明：本页面设置 noindex；若需要真正的权限隔离，请部署在带登录鉴权的私有站点或受控网络中。</p></section></main></div>`;
   }
   function renderMosRows(result) {
     let rows = result.mosRows.filter((row) => row.blindId === state.selectedBlindId);
@@ -196,11 +245,27 @@
   function renderCompare() {
     const result = compare(state.reference,state.editable,state.tolerance); const metrics = result.metrics; const edits = collectChanges(state.original,state.editable);
     const candidateList = candidates(state.editable); if (!state.selectedBlindId && candidateList.length) state.selectedBlindId = candidateList[0].blind_id;
-    root.innerHTML = `<div class="comparison-shell">${header()}<main class="comparison-main"><section class="comparison-hero"><div><p class="comparison-eyebrow">${h(state.editable.case_id)} · ${h(state.editable.task_bundle_id)}</p><h1>验收辅助判断</h1><p>MOS 超出 ±${state.tolerance} 分时进入人工复核；备注和低分问题在每一行展开查看。ELO 差异不会自动导致不通过。</p></div>${suiteNav()}</section><div class="compare-toolbar"><div class="button-row"><button class="button button-ghost" data-action="back-import">${icon("arrowLeft",15)} 更换结果</button><label class="tolerance-control">MOS 容差<select data-role="tolerance"><option value="1" ${state.tolerance===1?"selected":""}>±1 分</option><option value="2" ${state.tolerance===2?"selected":""}>±2 分</option></select></label></div><span class="edit-count" data-edit-count>管理员已修改 ${edits.length} 个字段</span></div><div class="summary-grid"><div class="summary-card"><span>MOS 对比项</span><strong>${metrics.total}</strong></div><div class="summary-card is-good"><span>完全一致</span><strong>${metrics.exact}</strong></div><div class="summary-card"><span>容差内差异</span><strong>${metrics.acceptable}</strong></div><div class="summary-card ${metrics.outliers?"is-danger":"is-good"}"><span>超出容差</span><strong>${metrics.outliers}</strong></div><div class="summary-card"><span>ELO 一致</span><strong>${metrics.eloSame}/${metrics.eloTotal}</strong></div></div><div class="recommendation ${metrics.outliers?"needs-review":""}">${icon(metrics.outliers?"warning":"checkCircle",18)} ${metrics.outliers?`有 ${metrics.outliers} 个 MOS 项需结合备注人工复核`:`未发现超出 MOS 容差的评分，建议通过`}</div><section class="comparison-card comparison-section"><div class="section-title"><div><h2>MOS 分层对比</h2><p>参考分固定；标注分、问题标签和备注均可直接修订。</p></div><div class="filter-tabs"><button data-filter="all" class="${state.filter==="all"?"is-active":""}">全部</button><button data-filter="different" class="${state.filter==="different"?"is-active":""}">有差异</button><button data-filter="outlier" class="${state.filter==="outlier"?"is-active":""}">仅需复核</button></div></div><div class="candidate-tabs">${candidateList.map((item,index)=>`<button data-candidate="${h(item.blind_id)}" class="${item.blind_id===state.selectedBlindId?"is-active":""}">候选 ${String(index+1).padStart(2,"0")}</button>`).join("")}</div><div class="comparison-table-wrap" style="margin-top:12px"><table class="comparison-table"><thead><tr><th>维度</th><th>参考分</th><th>标注分</th><th>差值</th><th>辅助判断</th><th>证据</th></tr></thead><tbody>${renderMosRows(result)}</tbody></table></div></section><section class="comparison-card comparison-section"><div class="section-title"><div><h2>ELO 结果对比</h2><p>胜/平/负差异只作信息提示，不参与自动判退；可直接修订标注结果。</p></div></div><div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th>对战</th><th>维度</th><th>参考答案</th><th>标注结果</th><th>提示</th></tr></thead><tbody>${renderEloRows(result)}</tbody></table></div></section><div class="result-actions"><div><strong>${metrics.outliers?"建议人工复核":"建议通过"}</strong><div class="edit-count">修订将写入新的 Revision，原完成时间保留。</div></div><div class="button-row"><button class="button button-ghost" data-action="copy-report">${icon("copy",14)} 复制结构化报告 JSON</button><button class="button button-ghost" data-action="download-image">${icon("download",14)} 下载对比长图 PNG</button><button class="button button-primary" data-action="copy-result">${icon("copy",14)} 复制修订结果 JSON</button><button class="button button-primary" data-action="download-result">${icon("download",14)} 下载修订结果</button></div></div></main></div>`;
+    parkAudioDock(false);
+    root.innerHTML = `<div class="comparison-shell">${header()}<main class="comparison-main"><section class="comparison-hero"><div><p class="comparison-eyebrow">${h(state.editable.case_id)} · ${h(state.editable.task_bundle_id)}</p><h1>验收辅助判断</h1><p>MOS 超出 ±${state.tolerance} 分时进入人工复核；备注和低分问题在每一行展开查看。ELO 差异不会自动导致不通过。</p></div>${suiteNav()}</section><div class="compare-toolbar"><div class="button-row"><button class="button button-ghost" data-action="back-import">${icon("arrowLeft",15)} 更换结果</button><label class="tolerance-control">MOS 容差<select data-role="tolerance"><option value="1" ${state.tolerance===1?"selected":""}>±1 分</option><option value="2" ${state.tolerance===2?"selected":""}>±2 分</option></select></label></div><span class="edit-count" data-edit-count>管理员已修改 ${edits.length} 个字段</span></div><div class="summary-grid"><div class="summary-card"><span>MOS 对比项</span><strong>${metrics.total}</strong></div><div class="summary-card is-good"><span>完全一致</span><strong>${metrics.exact}</strong></div><div class="summary-card"><span>容差内差异</span><strong>${metrics.acceptable}</strong></div><div class="summary-card ${metrics.outliers?"is-danger":"is-good"}"><span>超出容差</span><strong>${metrics.outliers}</strong></div><div class="summary-card"><span>ELO 一致</span><strong>${metrics.eloSame}/${metrics.eloTotal}</strong></div></div><div class="recommendation ${metrics.outliers?"needs-review":""}">${icon(metrics.outliers?"warning":"checkCircle",18)} ${metrics.outliers?`有 ${metrics.outliers} 个 MOS 项需结合备注人工复核`:`未发现超出 MOS 容差的评分，建议通过`}</div><section class="comparison-card comparison-section"><div class="section-title"><div><h2>MOS 分层对比</h2><p>参考分固定；标注分、问题标签和备注均可直接修订。</p></div><div class="filter-tabs"><button data-filter="all" class="${state.filter==="all"?"is-active":""}">全部</button><button data-filter="different" class="${state.filter==="different"?"is-active":""}">有差异</button><button data-filter="outlier" class="${state.filter==="outlier"?"is-active":""}">仅需复核</button></div></div><div class="candidate-tabs">${candidateList.map((item,index)=>`<button data-candidate="${h(item.blind_id)}" class="${item.blind_id===state.selectedBlindId?"is-active":""}">候选 ${String(index+1).padStart(2,"0")}</button>`).join("")}</div><div class="comparison-table-wrap" style="margin-top:12px"><table class="comparison-table"><thead><tr><th>维度</th><th>参考分</th><th>标注分</th><th>差值</th><th>辅助判断</th><th>证据</th></tr></thead><tbody>${renderMosRows(result)}</tbody></table></div></section><section class="comparison-card comparison-section"><div class="section-title"><div><h2>ELO 结果对比</h2><p>胜/平/负差异只作信息提示，不参与自动判退；可直接修订标注结果。</p></div></div><div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th>对战</th><th>维度</th><th>参考答案</th><th>标注结果</th><th>提示</th></tr></thead><tbody>${renderEloRows(result)}</tbody></table></div></section><div class="result-actions"><div><strong>${metrics.outliers?"建议人工复核":"建议通过"}</strong><div class="edit-count">修订将写入新的 Revision，原完成时间保留。</div></div><div class="button-row"><button class="button button-ghost" data-action="copy-report">${icon("copy",14)} 复制结构化报告 JSON</button><button class="button button-ghost" data-action="download-image">${icon("download",14)} 下载对比长图 PNG</button><button class="button button-primary" data-action="copy-result">${icon("copy",14)} 复制修订结果 JSON</button><button class="button button-primary" data-action="download-result">${icon("download",14)} 下载修订结果</button><button class="button button-primary" data-action="next-comparison">继续对比下一份 ${icon("arrowRight",14)}</button></div></div></main></div>`;
     const mosSectionMarker = '<section class="comparison-card comparison-section"><div class="section-title"><div><h2>MOS 分层对比</h2>';
-    root.innerHTML = root.innerHTML.replace(mosSectionMarker, `${renderAudioPanel(candidateList)}${mosSectionMarker}`);
+    const audioPlaceholder = '<div data-audio-dock-anchor></div>';
+    root.innerHTML = root.innerHTML.replace(mosSectionMarker, `${audioDock ? audioPlaceholder : renderAudioPanel(candidateList)}${mosSectionMarker}`);
+    mountAudioDock(candidateList);
   }
   function render() { state.screen === "compare" ? renderCompare() : renderImport(); }
+  function prepareNextComparison() {
+    state.screen = "import";
+    state.candidateText = "";
+    state.original = null;
+    state.editable = null;
+    state.initial = null;
+    state.selectedBlindId = "";
+    state.filter = "all";
+    state.expanded.clear();
+    state.errors = [];
+    render();
+    window.setTimeout(() => { const field = root.querySelector('[data-role="candidate"]'); if (field && field.focus) field.focus(); }, 0);
+  }
   function setNestedText(target, role) {
     const item = mosMap(state.editable).get(target.dataset.blind); if (!item) return;
     const key = target.dataset.dimension; const values = target.value.split(/\n|、/).map((value)=>value.trim()).filter(Boolean);
@@ -237,6 +302,7 @@
     if(action==="load-demo") return makeDemo();
     if(action==="analyze") { const ref=parseJson(state.referenceText,"参考答案"); const cand=parseJson(state.candidateText,"标注结果"); state.errors=[]; if(ref.error)state.errors.push(ref.error); if(cand.error)state.errors.push(cand.error); if(!state.errors)state.errors=validatePair(ref.value,cand.value); if(state.errors.length)return render(); state.reference=clone(ref.value);state.original=clone(cand.value);state.editable=clone(cand.value);state.initial=compare(state.reference,state.original,state.tolerance);state.selectedBlindId=candidates(state.editable)[0].blind_id;state.screen="compare";return render(); }
     if(action==="back-import") { state.screen="import";state.errors=[];return render(); }
+    if(action==="next-comparison") return prepareNextComparison();
     if(action==="toggle-evidence") { state.expanded.has(target.dataset.key)?state.expanded.delete(target.dataset.key):state.expanded.add(target.dataset.key);return render(); }
     if(action==="toggle-comparison-issue") { const item=mosMap(state.editable).get(target.dataset.blind); if(!item)return; const key=target.dataset.dimension; const current=key==="instruction_following"?(item.instruction_deductions||[]):((item.low_score_issues&&item.low_score_issues[key])||[]); const next=current.includes(target.dataset.issue)?current.filter((value)=>value!==target.dataset.issue):current.concat(target.dataset.issue); if(key==="instruction_following")item.instruction_deductions=next;else{item.low_score_issues=item.low_score_issues||{};item.low_score_issues[key]=next;} return render(); }
     if(target.dataset.candidate){state.selectedBlindId=target.dataset.candidate;return render();}
@@ -244,6 +310,6 @@
     const resultActions={"copy-report":()=>U.copyText(JSON.stringify(buildReport(),null,2)),"download-image":()=>downloadComparisonImage(),"copy-result":()=>U.copyText(JSON.stringify(buildCorrectedResult(),null,2)),"download-result":()=>U.downloadText(`reviewed-${U.fileSafe(state.editable.case_id)}.json`,JSON.stringify(buildCorrectedResult(),null,2),"application/json")};
     if(resultActions[action]){try{await resultActions[action]();toast(action.startsWith("copy")?"已复制到剪贴板":"文件已下载","success");}catch(error){toast("操作失败，请重试","error");}}
   });
-  window.__SB_COMPARISON_TEST__={state,validatePair,compare,collectChanges,downloadComparisonImage,makeDemo,render};
+  window.__SB_COMPARISON_TEST__={state,validatePair,compare,collectChanges,downloadComparisonImage,makeDemo,prepareNextComparison,render};
   render();
 })();
