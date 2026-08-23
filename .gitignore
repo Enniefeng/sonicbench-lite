@@ -6,6 +6,7 @@
 node_modules/
 dist/
 tmp/
+sonicbench-miaoda/
 *-ADMIN-MAPPING.json
 *-work-order.csv
 *work-order.tsv

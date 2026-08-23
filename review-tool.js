@@ -83,6 +83,7 @@
     restoredDraft: false,
     sourceAnnotation: null,
     railScrollTop: 0,
+    validationOpen: false,
     autoPlayFirstAudio: readAutoPlayPreference(),
     selectedModelCount: 6
   };
@@ -713,6 +714,7 @@
     state.startedAt = annotation && annotation.started_at ? annotation.started_at : U.nowISO();
     state.exportResult = null;
     state.restoredDraft = false;
+    state.validationOpen = false;
     playbackMemory.clear();
     lastRenderedSubtaskKey = "";
 
@@ -781,6 +783,86 @@
     const answer = state.eloMatches[matchId];
     if (!answer || !answer.dimension_results) return ELO_DIMENSIONS.length;
     return ELO_DIMENSIONS.filter((dimension) => !["left", "draw", "right"].includes(answer.dimension_results[dimension.key])).length;
+  }
+
+  function mosMissingItems(candidateId) {
+    const answer = state.mos[candidateId];
+    if (!answer || !answer.scores) return [];
+    const items = [];
+    DIMENSIONS.forEach((dimension) => {
+      if (!Number.isInteger(answer.scores[dimension.key])) {
+        items.push({
+          key: `score:${dimension.key}`,
+          label: `${dimension.label}：请选择评分`,
+          selector: `.dimension-block[data-dimension="${dimension.key}"] .score-scale`
+        });
+      }
+    });
+    SUBDIMENSIONS.forEach((dimension) => {
+      if (!Number.isInteger(answer.scores[dimension.key]) || answer.scores[dimension.key] > 3) return;
+      const selected = answer.low_score_issues[dimension.key] || [];
+      if (!selected.length) {
+        items.push({
+          key: `issues:${dimension.key}`,
+          label: `${dimension.label}：请选择低分问题`,
+          selector: `.dimension-block[data-dimension="${dimension.key}"] .issue-panel`
+        });
+      } else if (selected.includes("其他") && !String(answer.notes[dimension.key] || "").trim()) {
+        items.push({
+          key: `other-note:${dimension.key}`,
+          label: `${dimension.label}：请补充“其他”问题备注`,
+          selector: `textarea[data-role="mos-note"][data-dimension="${dimension.key}"]`
+        });
+      }
+    });
+    GROUP_OVERALL_DIMENSIONS.forEach((dimension) => {
+      if (Number.isInteger(answer.scores[dimension.key]) && answer.scores[dimension.key] <= 3 && !String(answer.notes[dimension.key] || "").trim()) {
+        items.push({
+          key: `overall-note:${dimension.key}`,
+          label: `${dimension.label}：请填写低分备注`,
+          selector: `textarea[data-role="mos-note"][data-dimension="${dimension.key}"]`
+        });
+      }
+    });
+    if (!String(answer.notes[TOTAL_DIMENSION.key] || "").trim()) {
+      items.push({
+        key: `total-note:${TOTAL_DIMENSION.key}`,
+        label: "总评备注：请填写",
+        selector: `textarea[data-role="mos-note"][data-dimension="${TOTAL_DIMENSION.key}"]`
+      });
+    }
+    if (Number.isInteger(answer.scores[INSTRUCTION_DIMENSION.key]) && answer.scores[INSTRUCTION_DIMENSION.key] < 5 && !(answer.instruction_deductions || []).length) {
+      items.push({
+        key: `deductions:${INSTRUCTION_DIMENSION.key}`,
+        label: "指令遵循：请选择未遵循项",
+        selector: ".instruction-issues .issue-chips"
+      });
+    }
+    if ((answer.instruction_deductions || []).length && !String(answer.instruction_note || "").trim()) {
+      items.push({
+        key: `instruction-note:${INSTRUCTION_DIMENSION.key}`,
+        label: "指令遵循：请填写扣分原因",
+        selector: 'textarea[data-role="instruction-note"]'
+      });
+    }
+    return items;
+  }
+
+  function eloMissingItems(matchId) {
+    const answer = state.eloMatches[matchId];
+    if (!answer || !answer.dimension_results) return [];
+    return ELO_DIMENSIONS.filter((dimension) => !["left", "draw", "right"].includes(answer.dimension_results[dimension.key])).map((dimension) => ({
+      key: `elo:${dimension.key}`,
+      label: `${dimension.label}：请选择 A 胜、平局或 B 胜`,
+      selector: `.elo-dimension-row[data-dimension="${dimension.key}"]`
+    }));
+  }
+
+  function currentMissingItems() {
+    if (!state.task) return [];
+    if (state.currentIndex < state.task.modelCount) return mosMissingItems(state.task.candidates[state.currentIndex].id);
+    const match = state.task.eloMatches[state.currentIndex - state.task.modelCount];
+    return match ? eloMissingItems(match.match_id) : [];
   }
 
   function progress() {
@@ -1284,7 +1366,7 @@
   function renderDimension(candidateId, dimension, answer, config) {
     const score = answer.scores[dimension.key];
     const low = Number.isInteger(score) && score <= 3;
-    return `<div class="dimension-block ${config.overall ? "is-overall" : ""}"><div class="dimension-row"><div class="dimension-copy"><strong>${h(dimension.label)}</strong></div>${renderScoreScale(candidateId, dimension, answer)}</div>${config.subdimension && low ? renderIssueChips(candidateId, dimension, answer) : ""}${config.overall && low ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "整体维度低分备注", true) : ""}</div>`;
+    return `<div class="dimension-block ${config.overall ? "is-overall" : ""}" data-dimension="${h(dimension.key)}"><div class="dimension-row"><div class="dimension-copy"><strong>${h(dimension.label)}</strong></div>${renderScoreScale(candidateId, dimension, answer)}</div>${config.subdimension && low ? renderIssueChips(candidateId, dimension, answer) : ""}${config.overall && low ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "整体维度低分备注", true) : ""}</div>`;
   }
 
   function renderInstructionDeductions(candidateId, answer) {
@@ -1327,7 +1409,7 @@
       ${renderStickyContext(`<div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true)}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true)}</div>`)}
       <section class="rating-panel elo-rating">
         <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
-        <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
+        <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row" data-dimension="${h(dimension.key)}"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
         <label class="dimension-note-field elo-note"><span>本场共用备注 · 选填</span><textarea rows="2" data-role="elo-note" data-match="${h(match.match_id)}" placeholder="可补充四个维度的共同判断依据">${h(answer.note || "")}</textarea></label>
       </section>
     </section>`;
@@ -1337,6 +1419,18 @@
     if (state.currentIndex < state.task.modelCount) return mosComplete(state.task.candidates[state.currentIndex].id);
     const match = state.task.eloMatches[state.currentIndex - state.task.modelCount];
     return eloMatchComplete(match.match_id);
+  }
+
+  function renderValidationGuide() {
+    const items = state.validationOpen ? currentMissingItems() : [];
+    if (!items.length) return '<section class="missing-guide" data-validation-guide hidden></section>';
+    const preview = items.slice(0, 4).map((item) => h(item.label)).join("；");
+    const remaining = items.length > 4 ? `；另有 ${items.length - 4} 项` : "";
+    return `<section class="missing-guide" data-validation-guide role="alert" aria-live="assertive">
+      <span class="missing-guide-icon">${icon("warning", 18)}</span>
+      <div class="missing-guide-copy"><strong>还有 ${items.length} 项必填内容未完成</strong><p>${preview}${remaining}</p></div>
+      <button type="button" class="button compact" data-action="jump-missing">定位第一处 ${icon("arrowRight", 14)}</button>
+    </section>`;
   }
 
   function renderActionBar() {
@@ -1368,7 +1462,7 @@
           ${state.restoredDraft ? `<div class="history-banner draft-mode">${icon("refresh", 18)}<div><strong>已恢复本地草稿</strong><span>继续上次未完成的位置；最终仍需复制结果回工单。</span></div></div>` : ""}
           ${renderProgressBand()}
         </section>
-        <div class="review-layout">${renderTaskRail()}<div class="task-main">${taskSurface}${renderActionBar()}</div></div>
+        <div class="review-layout">${renderTaskRail()}<div class="task-main">${taskSurface}${renderValidationGuide()}${renderActionBar()}</div></div>
       </main>
     </div>`;
   }
@@ -1486,6 +1580,38 @@
     element.innerHTML = complete ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`;
   }
 
+  function clearMissingHighlights() {
+    root.querySelectorAll(".is-required-missing").forEach((element) => {
+      element.classList.remove("is-required-missing");
+      element.removeAttribute("aria-invalid");
+    });
+  }
+
+  function refreshValidationGuide() {
+    const items = state.validationOpen ? currentMissingItems() : [];
+    if (!items.length) state.validationOpen = false;
+    replaceHtml(root.querySelector("[data-validation-guide]"), renderValidationGuide());
+  }
+
+  function jumpToFirstMissing() {
+    const item = currentMissingItems()[0];
+    if (!item) {
+      state.validationOpen = false;
+      refreshValidationGuide();
+      return;
+    }
+    clearMissingHighlights();
+    const target = root.querySelector(item.selector);
+    if (!target) return;
+    target.classList.add("is-required-missing");
+    target.setAttribute("aria-invalid", "true");
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusTarget = target.matches("button,textarea,input,select")
+      ? target
+      : target.querySelector("button,textarea,input,select");
+    if (focusTarget) window.setTimeout(() => focusTarget.focus({ preventScroll: true }), 260);
+  }
+
   function refreshWorkspaceStatus() {
     if (state.screen !== "task") return;
     const rail = root.querySelector(".task-rail");
@@ -1498,6 +1624,7 @@
     }
     replaceHtml(root.querySelector(".action-bar"), renderActionBar());
     refreshCurrentStageState();
+    refreshValidationGuide();
     refreshQualityAuditRegion();
   }
 
@@ -1536,9 +1663,16 @@
 
   function goNext() {
     if (!currentComplete()) {
-      toast(state.currentIndex < state.task.modelCount ? "请完成当前音频的全部评分与必填反馈" : "请完成本场四个 ELO 维度的胜／平／负判断", "error");
+      const items = currentMissingItems();
+      state.validationOpen = true;
+      refreshValidationGuide();
+      const preview = items.slice(0, 2).map((item) => item.label).join("；");
+      toast(`还有 ${items.length} 项未完成${preview ? `：${preview}${items.length > 2 ? "……" : ""}` : ""}`, "error");
+      jumpToFirstMissing();
       return;
     }
+    state.validationOpen = false;
+    clearMissingHighlights();
     const p = progress();
     if (state.currentIndex === state.task.modelCount - 1 && p.mos < state.task.modelCount) {
       toast(`请先完成全部 ${state.task.modelCount} 项 MOS`, "error");
@@ -1589,6 +1723,7 @@
     state.restoredDraft = false;
     state.sourceAnnotation = null;
     state.railScrollTop = 0;
+    state.validationOpen = false;
     playbackMemory.clear();
     lastRenderedSubtaskKey = "";
     if (draftSaveTimer != null) {
@@ -1604,13 +1739,15 @@
       state.mos[event.target.dataset.id].notes[event.target.dataset.dimension] = event.target.value;
       state.exportResult = null;
       scheduleDraftSave();
-      refreshQualityAuditRegion();
+      clearMissingHighlights();
+      refreshWorkspaceStatus();
     }
     if (event.target.dataset.role === "instruction-note") {
       state.mos[event.target.dataset.id].instruction_note = event.target.value;
       state.exportResult = null;
       scheduleDraftSave();
-      refreshQualityAuditRegion();
+      clearMissingHighlights();
+      refreshWorkspaceStatus();
     }
     if (event.target.dataset.role === "elo-note") {
       state.eloMatches[event.target.dataset.match].note = event.target.value;
@@ -1694,6 +1831,7 @@
       return U.copyText(target.dataset.id).then(() => toast("匿名 ID 已复制", "success")).catch(() => toast("复制失败，请手动选择", "error"));
     }
     if (action === "set-score") {
+      clearMissingHighlights();
       const score = Number(target.dataset.score);
       const answer = state.mos[target.dataset.id];
       answer.scores[target.dataset.dimension] = score;
@@ -1702,6 +1840,7 @@
       return refreshMosDimension(target.closest(".dimension-block"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-issue") {
+      clearMissingHighlights();
       const answer = state.mos[target.dataset.id];
       const selected = answer.low_score_issues[target.dataset.dimension] || [];
       answer.low_score_issues[target.dataset.dimension] = selected.includes(target.dataset.issue)
@@ -1712,6 +1851,7 @@
       return refreshIssuePanel(target.closest(".issue-panel"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-deduction") {
+      clearMissingHighlights();
       const answer = state.mos[target.dataset.id];
       answer.instruction_deductions = answer.instruction_deductions.includes(target.dataset.issue)
         ? answer.instruction_deductions.filter((item) => item !== target.dataset.issue)
@@ -1727,6 +1867,7 @@
       if (!["left", "draw", "right"].includes(target.dataset.outcome) || !ELO_DIMENSIONS.some((dimension) => dimension.key === target.dataset.dimension)) {
         return toast("无法识别这一维度的 ELO 结果", "error");
       }
+      clearMissingHighlights();
       state.eloMatches[target.dataset.match].dimension_results[target.dataset.dimension] = target.dataset.outcome;
       state.exportResult = null;
       scheduleDraftSave();
@@ -1735,15 +1876,18 @@
     if (action === "go-task") {
       const index = Number(target.dataset.index);
       if (index >= state.task.modelCount && progress().mos < state.task.modelCount) return toast("完成全部 MOS 后才能进入 ELO 对战", "error");
+      state.validationOpen = false;
       state.currentIndex = index;
       flushDraftSave();
       return render();
     }
     if (action === "previous") {
+      state.validationOpen = false;
       state.currentIndex = Math.max(0, state.currentIndex - 1);
       flushDraftSave();
       return render();
     }
+    if (action === "jump-missing") return jumpToFirstMissing();
     if (action === "next") return goNext();
     if (action === "show-result") return showResult();
     if (action === "new-case") return startNewCase();

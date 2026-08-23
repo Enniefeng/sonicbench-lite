@@ -116,7 +116,7 @@ function testReviewer(line, modelCount) {
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
     "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
-    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft"
+    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "currentMissingItems"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -197,6 +197,31 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(quality.task.modelCount, modelCount);
   api.loadTask(parsed.task, null, { skipDraft: true });
   assert(root.innerHTML.includes(`${modelCount} 模型 · ${parsed.task.totalSubtaskCount} 子任务`));
+  assert(root.innerHTML.includes("data-validation-guide"), "task workspace must reserve an inline missing-field guide");
+  assert(root.innerHTML.includes('data-dimension="melody"'), "MOS dimension blocks must be addressable for validation jumps");
+  const firstCandidateId = parsed.task.candidates[0].id;
+  assert.strictEqual(api.currentMissingItems().length, context.SB_SHARED_DATA.MOS_DIMENSIONS.length + 1, "blank MOS must list every missing score plus the required total note");
+  assert(api.currentMissingItems().some((item) => item.label.includes("旋律：请选择评分")), "missing guide must name the unscored dimension");
+  assert(api.currentMissingItems().some((item) => item.label.includes("总评备注")), "missing guide must name the required total note");
+  context.SB_SHARED_DATA.MOS_DIMENSIONS.forEach((dimension) => { api.state.mos[firstCandidateId].scores[dimension.key] = 4; });
+  api.state.mos[firstCandidateId].scores.instruction_following = 5;
+  api.state.mos[firstCandidateId].notes.overall = "整体完成度良好";
+  assert.strictEqual(api.currentMissingItems().length, 0, "complete MOS must have no missing guide items");
+  api.state.mos[firstCandidateId].scores.melody = 3;
+  assert.deepStrictEqual(Array.from(api.currentMissingItems().map((item) => item.label)), ["旋律：请选择低分问题"]);
+  api.state.mos[firstCandidateId].low_score_issues.melody = ["其他"];
+  assert.deepStrictEqual(Array.from(api.currentMissingItems().map((item) => item.label)), ["旋律：请补充“其他”问题备注"]);
+  api.state.mos[firstCandidateId].notes.melody = "旋律存在其他问题";
+  api.state.mos[firstCandidateId].scores.instruction_following = 4;
+  assert(api.currentMissingItems().some((item) => item.label.includes("请选择未遵循项")));
+  api.state.mos[firstCandidateId].instruction_deductions = ["曲风未遵循"];
+  assert(api.currentMissingItems().some((item) => item.label.includes("请填写扣分原因")));
+  api.state.mos[firstCandidateId].instruction_note = "曲风与输入不一致";
+  assert.strictEqual(api.currentMissingItems().length, 0);
+  api.state.currentIndex = modelCount;
+  assert.strictEqual(api.currentMissingItems().length, context.SB_SHARED_DATA.ELO_DIMENSIONS.length, "blank ELO must list every missing judgment dimension");
+  assert(api.currentMissingItems().every((item) => item.label.includes("请选择 A 胜、平局或 B 胜")), "ELO guidance must explain the required outcome choices");
+  api.state.currentIndex = 0;
   assert(root.innerHTML.includes('preload="metadata"'), "audio players must fetch duration metadata before playback");
   assert(root.innerHTML.includes("首音频自动播放"), "task header must expose the autoplay preference");
   assert(!root.innerHTML.includes("播放器快捷键"), "reviewer must not expose playback shortcut hints");
