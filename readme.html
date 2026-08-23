@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="SonicBench Lite 评测员与质检员使用指南、输入输出说明及版本记录。">
+  <title>SonicBench Lite · README 与版本记录</title>
+  <link rel="stylesheet" href="styles.css?v=20260823-guide-v2">
+</head>
+<body class="readme-body">
+  <div class="readme-shell">
+    <header class="review-topbar">
+      <a class="review-brand" href="./index.html" aria-label="返回 SonicBench Lite 评测工作台">
+        <span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17V6l10-2v11"></path><path d="M9 9l10-2"></path><ellipse cx="6" cy="17" rx="3" ry="2"></ellipse><ellipse cx="16" cy="15" rx="3" ry="2"></ellipse></svg></span>
+        <span><strong>SonicBench 2–6M</strong><small>动态多模型匿名评测任务卡</small></span>
+      </a>
+      <nav class="product-tabs" aria-label="产品页面">
+        <a href="./index.html">评测工作台</a>
+        <a class="is-active" href="./readme.html" aria-current="page">README</a>
+      </nav>
+      <div class="topbar-actions"><span class="privacy-chip">使用指南 · 版本记录</span></div>
+    </header>
+
+    <main class="readme-page">
+      <header class="readme-intro">
+        <div><span class="eyebrow">SONICBENCH LITE · README</span><h1>使用指南与版本记录</h1><p>本页面向评测员和质检员，说明如何加载任务、完成评测或复核，并导出结果。</p></div>
+        <nav class="readme-index" aria-label="README 目录"><a href="#quick-start">快速开始</a><a href="#role-guide">角色指南</a><a href="#data-guide">输入与输出</a><a href="#release-timeline">版本记录</a></nav>
+      </header>
+
+      <section class="readme-section" id="quick-start" aria-labelledby="quick-start-title">
+        <div class="readme-section-heading"><span class="eyebrow">QUICK START</span><h2 id="quick-start-title">快速开始</h2><p>评测和质检共用同一个工作台，通过工作模式区分操作流程。</p></div>
+        <ol class="readme-flow flow-four">
+          <li><span>01</span><strong>选择工作模式</strong><small>新任务选“标注模式”；复核已有结果选“质检验收模式”</small></li>
+          <li><span>02</span><strong>加载 Case</strong><small>标注模式粘贴脱敏工单行；质检模式粘贴结果 JSON</small></li>
+          <li><span>03</span><strong>完成任务</strong><small>完成 MOS 与 ELO，或逐项复核并修订已有答案</small></li>
+          <li><span>04</span><strong>导出结果</strong><small>在结果页复制或下载 JSON，并回填到对应工单</small></li>
+        </ol>
+      </section>
+
+      <section class="readme-section" id="role-guide" aria-labelledby="role-guide-title">
+        <div class="readme-section-heading"><span class="eyebrow">ROLE GUIDE</span><h2 id="role-guide-title">按角色使用</h2><p>评测员负责完成新任务；质检员负责复核与修订已有结果。</p></div>
+        <div class="role-guide">
+          <article>
+            <header><span>01</span><div><h3>评测员</h3><p>完成 MOS 与 ELO 评测</p></div></header>
+            <ol><li>在工作台选择与工单一致的模型数量。</li><li>从在线表格或 Excel 复制整行，粘贴后进入标注。</li><li>依次完成 MOS 和 ELO；缺少必填项时按页面提示定位补充。</li><li>在结果页复制或下载 JSON，再粘回对应工单行。</li></ol>
+          </article>
+          <article>
+            <header><span>02</span><div><h3>质检员</h3><p>复核并修订已有结果</p></div></header>
+            <ol><li>切换到“质检验收模式”，粘贴评测员导出的自包含 JSON。</li><li>逐项检查评分、标签、备注和匿名音频。</li><li>如需调整，修改后查看本次变更清单与 Revision 记录。</li><li>使用“下一项”继续检查，完成后导出修订结果。</li></ol>
+          </article>
+        </div>
+      </section>
+
+      <section class="readme-section" id="data-guide" aria-labelledby="data-guide-title">
+        <div class="readme-section-heading"><span class="eyebrow">INPUT &amp; OUTPUT</span><h2 id="data-guide-title">输入与输出</h2><p>下表用于确认每个阶段需要准备和保存的内容。</p></div>
+        <div class="readme-table-wrap">
+          <table class="readme-table">
+            <thead><tr><th>阶段</th><th>输入</th><th>输出／需要保存</th></tr></thead>
+            <tbody>
+              <tr><th>评测标注</th><td>单条脱敏工单行</td><td>自包含结果 JSON，或带结果的完整工单行</td></tr>
+              <tr><th>质检验收</th><td>评测结果 JSON</td><td>包含修订记录与新版 Revision 的结果 JSON</td></tr>
+              <tr><th>中途恢复</th><td>当前浏览器中的本机 Case 历史</td><td>恢复评分后重新进入结果页导出的 JSON</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="readme-note"><strong>本机恢复：</strong>工作台会在当前浏览器保存脱敏工单与评分草稿；正式交付仍以结果页导出的 JSON 为准。</p>
+      </section>
+
+      <section class="release-timeline" id="release-timeline" aria-labelledby="release-timeline-title">
+        <div class="release-heading"><div><span class="eyebrow">VERSION HISTORY</span><h2 id="release-timeline-title">版本记录</h2><p>按日期展示主要功能修改与体验优化。</p></div><span>7 个版本节点</span></div>
+        <ol class="release-list">
+          <li class="release-item is-current"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R7</span><time datetime="2026-08-23">2026.08.23</time><em>当前版本</em></div><div class="release-content"><div><h3>恢复与必填保护</h3><ul><li>必填遗漏自动定位</li><li>本机 Case 历史恢复</li><li>未导出离开提醒</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R6</span><time datetime="2026-08-22">2026.08.22</time></div><div class="release-content"><div><h3>质检操作优化</h3><ul><li>质检模式支持下一项与独立导出</li><li>展示本次修改内容</li><li>Revision 增量记录</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R5</span><time datetime="2026-08-21">2026.08.21</time></div><div class="release-content"><div><h3>评分规则与界面优化</h3><ul><li>完善低分问题选项</li><li>完善指令未遵循项</li><li>ELO 支持四维胜／平／负</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R4</span><time datetime="2026-08-17">2026.08.17</time></div><div class="release-content"><div><h3>动态模型数量适配</h3><ul><li>支持 2–6 个模型</li><li>工单附加列容错</li><li>模型数量保存在当前浏览器</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R3</span><time datetime="2026-08-16">2026.08.16</time></div><div class="release-content"><div><h3>播放与质检审计</h3><ul><li>MOS／ELO 播放稳定化</li><li>首音频自动播放</li><li>Revision 增量修改记录</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R2</span><time datetime="2026-08-15">2026.08.15</time></div><div class="release-content"><div><h3>音频兼容与使用优化</h3><ul><li>Markdown 音频 URL 兼容</li><li>音频时长预载</li><li>完善角色使用说明</li></ul></div></div></article></li>
+          <li class="release-item"><span class="release-node" aria-hidden="true"></span><article><div class="release-meta"><span>R1</span><time datetime="2026-08-13">2026.08.13</time></div><div class="release-content"><div><h3>基础评测能力</h3><ul><li>脱敏工单加载</li><li>MOS 与 ELO 动态盲评</li><li>结果 JSON 导出与质检回填</li></ul></div></div></article></li>
+        </ol>
+        <p class="release-source">版本节点按功能演进归并整理，用于说明主要能力变化与体验优化。</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

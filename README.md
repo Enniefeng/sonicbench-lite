@@ -13,6 +13,20 @@ SonicBench Lite 是一个在浏览器中运行的音乐生成模型盲评工具�
 
 > 在线页面是纯静态应用。输入内容不会上传到 SonicBench Lite 的服务器，但音频播放仍会访问 URL 所在的音频服务器。普通评测页面不提供任何管理员入口；静态页面的未公开链接并不等于真正鉴权，敏感场景应使用私有部署或登录保护。
 
+## 版本时间线
+
+以下按功能演进将迭代归并为产品里程碑，时间均为北京时间（UTC+8）。
+
+| 版本 | 更新时间 | 主题 | 主要变化 | 追溯提交 |
+| --- | --- | --- | --- | --- |
+| R7 | 2026-08-23 | 恢复与必填保护 | 必填遗漏定位、本机 Case 历史、未导出离开提醒 | [`64ced4f`](https://github.com/Enniefeng/sonicbench-lite/commit/64ced4f) |
+| R6 | 2026-08-22 | 质检与批量操作优化 | 结果一致性检查、冻结试听区、批量对比后保留参考答案 | [`473e6bf`](https://github.com/Enniefeng/sonicbench-lite/commit/473e6bf) |
+| R5 | 2026-08-21 | 音频辅助对比 | 结果对比页匿名音频试听、稳定播放、试听区不进入长图 | [`780defd`](https://github.com/Enniefeng/sonicbench-lite/commit/780defd) |
+| R4 | 2026-08-17 | 动态工单与视觉报告 | 动态 2–6 模型、附加列容错、PNG 对比报告 | [`2a45b78`](https://github.com/Enniefeng/sonicbench-lite/commit/2a45b78) |
+| R3 | 2026-08-16 | 播放与质检审计 | MOS／ELO 播放优化、首音频自动播放、Revision 修改记录 | [`ae4f538`](https://github.com/Enniefeng/sonicbench-lite/commit/ae4f538) |
+| R2 | 2026-08-15 | 音频兼容与使用优化 | Markdown URL、时长预载、完善角色使用说明 | [`fa8f5fb`](https://github.com/Enniefeng/sonicbench-lite/commit/fa8f5fb) |
+| R1 | 2026-08-13 | 基础评测能力 | 脱敏工单、MOS／ELO 动态盲评、结果 JSON 与聚合计算 | [`5f0ce0a`](https://github.com/Enniefeng/sonicbench-lite/commit/5f0ce0a) |
+
 ## 工作流程
 
 ```text
@@ -74,7 +88,7 @@ case_id,tag,lyrics,model_1_url,model_2_url,...,model_n_url
 6. 在结果页复制结果 JSON、复制完整工单行，或下载结果 CSV。原工单右侧的附加列会原样保留。
 7. 点击“导入新 Case”继续下一条任务。
 
-手动粘贴的工单始终具有最高优先级：粘贴不含结果的工单会从空白评分开始，即使浏览器曾保存过同一工单的草稿；只有点击首页单独的“恢复草稿”按钮才会读取本地缓存。粘贴明确包含 `annotation_result_json` 的工单仍会恢复其中的历史结果。
+手动粘贴的工单始终具有最高优先级：粘贴不含结果的工单会从空白评分开始，即使浏览器曾保存过同一工单的草稿；只有在首页“本机 Case 历史”中点击“恢复记录”才会读取本地缓存。粘贴明确包含 `annotation_result_json` 的工单仍会恢复其中的历史结果。
 
 MOS 当前包含音乐性、音质与声学表现、Vocals、指令遵循和总评：
 

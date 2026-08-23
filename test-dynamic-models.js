@@ -123,6 +123,7 @@ function testReviewer(line, modelCount) {
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
   assert(root.innerHTML.includes("3–21</b>"), "review import must keep the task range on one semantic value");
+  assert(root.innerHTML.includes("product-tabs") && root.innerHTML.includes("readme.html"), "review topbar must link to the external README page");
   api.writeModelCountPreference(modelCount);
   assert.strictEqual(api.readModelCountPreference(), modelCount, "model-count preference must persist in localStorage");
   api.state.selectedModelCount = modelCount;

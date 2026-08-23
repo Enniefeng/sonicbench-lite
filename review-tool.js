@@ -1235,6 +1235,7 @@
         <span class="brand-symbol">${icon("headphones", 19)}</span>
         <span><strong>SonicBench 2–6M</strong><small>动态多模型匿名评测任务卡</small></span>
       </div>
+      <nav class="product-tabs" aria-label="产品页面"><a class="is-active" href="./index.html" aria-current="page">评测工作台</a><a href="./readme.html">README</a></nav>
       <div class="topbar-actions">${extra || ""}<span class="privacy-chip">${icon("shield", 15)} 仅处理脱敏工单</span></div>
     </header>`;
   }
