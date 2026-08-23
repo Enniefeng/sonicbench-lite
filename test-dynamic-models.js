@@ -42,6 +42,8 @@ function makeContext(appId) {
     setTimeout,
     clearTimeout,
     localStorage: {
+      get length() { return storage.size; },
+      key(index) { return Array.from(storage.keys())[index] || null; },
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
       setItem(key, value) { storage.set(key, String(value)); },
       removeItem(key) { storage.delete(key); }
@@ -116,7 +118,7 @@ function testReviewer(line, modelCount) {
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
     "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
-    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "currentMissingItems"
+    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "resumeDraftByKey", "listDraftHistory", "startNewCase", "currentMissingItems"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -186,9 +188,11 @@ function testReviewer(line, modelCount) {
 
   api.state.mos[parsed.task.candidates[0].id].scores.melody = 4;
   api.saveDraft();
-  api.state.screen = "import";
-  api.render();
-  api.resumeLastDraft();
+  const localHistory = api.listDraftHistory();
+  assert(localHistory.some((entry) => entry.task.caseId === parsed.task.caseId), "saved cases must remain discoverable in local history");
+  api.startNewCase();
+  assert(root.innerHTML.includes("本机 Case 历史"), "new-case import screen must expose recoverable local history");
+  api.resumeDraftByKey(localHistory[0].key);
   assert.strictEqual(api.state.restoredDraft, true, "the explicit recovery action must still restore a valid local draft");
   assert.strictEqual(api.state.mos[parsed.task.candidates[0].id].scores.melody, 4, "explicit recovery must restore saved answers");
 

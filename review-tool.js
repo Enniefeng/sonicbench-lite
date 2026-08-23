@@ -80,6 +80,7 @@
     baseline: null,
     loadedHistory: false,
     exportResult: null,
+    resultExported: false,
     restoredDraft: false,
     sourceAnnotation: null,
     railScrollTop: 0,
@@ -90,6 +91,21 @@
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function invalidateExportResult() {
+    state.exportResult = null;
+    state.resultExported = false;
+  }
+
+  function markResultExported() {
+    state.resultExported = true;
+    saveDraft();
+    const status = root.querySelector("[data-result-export-state]");
+    if (status) {
+      status.classList.add("is-exported");
+      status.innerHTML = `${icon("checkCircle", 13)} 已复制或下载；可以继续下一条 Case`;
+    }
   }
 
   function audioPlaybackKey(audio) {
@@ -639,22 +655,24 @@
     }
   }
 
-  function clearLastDraftPointer() {
-    try {
-      window.localStorage.removeItem(LAST_DRAFT_KEY);
-    } catch (error) {
-      /* Returning to the import screen must still work when storage is unavailable. */
-    }
-  }
-
   function saveDraft() {
     if (!state.task) return;
+    const currentProgress = progress();
     const payload = {
-      version: 2,
+      version: 3,
       sanitized_cells: state.task.cells.slice(0, state.task.resultIndex),
       fingerprint: state.task.fingerprint,
+      case_id: state.task.caseId,
+      batch_id: state.task.batchId,
+      task_bundle_id: state.task.taskBundleId,
+      model_count: state.task.modelCount,
       mos: state.mos,
       elo_matches: state.eloMatches,
+      completed_subtask_count: currentProgress.total,
+      total_subtask_count: state.task.totalSubtaskCount,
+      status: currentProgress.total === state.task.totalSubtaskCount ? "complete" : "in_progress",
+      export_result: state.exportResult ? clone(state.exportResult) : null,
+      result_exported: Boolean(state.resultExported),
       current_index: state.currentIndex,
       started_at: state.startedAt,
       baseline: state.baseline,
@@ -713,6 +731,7 @@
     state.currentIndex = 0;
     state.startedAt = annotation && annotation.started_at ? annotation.started_at : U.nowISO();
     state.exportResult = null;
+    state.resultExported = false;
     state.restoredDraft = false;
     state.validationOpen = false;
     playbackMemory.clear();
@@ -728,6 +747,8 @@
         state.startedAt = draft.started_at || state.startedAt;
         state.baseline = draft.baseline || null;
         state.loadedHistory = Boolean(draft.loaded_history);
+        state.exportResult = draft.export_result ? clone(draft.export_result) : null;
+        state.resultExported = Boolean(draft.result_exported);
         state.restoredDraft = true;
       }
     }
@@ -738,8 +759,7 @@
     if (state.restoredDraft) toast("已恢复这条工单的本地草稿", "success");
   }
 
-  function mosComplete(candidateId) {
-    const answer = state.mos[candidateId];
+  function mosAnswerComplete(answer) {
     if (!answer || !answer.scores) return false;
     if (!DIMENSIONS.every((dimension) => Number.isInteger(answer.scores[dimension.key])
       && answer.scores[dimension.key] >= 1 && answer.scores[dimension.key] <= 5)) return false;
@@ -753,6 +773,10 @@
     if (answer.scores[INSTRUCTION_DIMENSION.key] < 5 && !(answer.instruction_deductions || []).length) return false;
     if ((answer.instruction_deductions || []).length && !String(answer.instruction_note || "").trim()) return false;
     return true;
+  }
+
+  function mosComplete(candidateId) {
+    return mosAnswerComplete(state.mos[candidateId]);
   }
 
   function mosMissingCount(candidateId) {
@@ -774,9 +798,12 @@
     return missing;
   }
 
-  function eloMatchComplete(matchId) {
-    const answer = state.eloMatches[matchId];
+  function eloAnswerComplete(answer) {
     return Boolean(answer && answer.dimension_results && ELO_DIMENSIONS.every((dimension) => ["left", "draw", "right"].includes(answer.dimension_results[dimension.key])));
+  }
+
+  function eloMatchComplete(matchId) {
+    return eloAnswerComplete(state.eloMatches[matchId]);
   }
 
   function eloMissingCount(matchId) {
@@ -1138,36 +1165,68 @@
     toast("已加载自包含质检结果，可查看时间并逐项验收", "success");
   }
 
-  function lastDraft() {
-    const pointer = readStorage(LAST_DRAFT_KEY);
-    if (!pointer || !pointer.key) return null;
-    const draft = readStorage(pointer.key);
-    return draft && Array.isArray(draft.sanitized_cells) ? draft : null;
-  }
-
-  function resumeLastDraft() {
-    const draft = lastDraft();
-    if (!draft) {
-      toast("没有可恢复的本地草稿", "error");
-      return;
-    }
+  function taskFromDraft(draft) {
+    if (!draft || !Array.isArray(draft.sanitized_cells)) return { task: null, errors: ["本机记录缺少工单字段"] };
     const contract = contractFromColumnCount(draft.sanitized_cells.length + 1);
-    if (!contract) {
-      toast("本地草稿已损坏或与当前格式不兼容", "error");
-      return;
-    }
+    if (!contract) return { task: null, errors: ["本机记录与当前格式不兼容"] };
     const cells = draft.sanitized_cells.slice(0, contract.resultIndex).concat("");
     const task = buildTask(cells);
     task.trailingCells = Array.isArray(draft.trailing_cells) ? draft.trailing_cells.slice() : [];
-    const errors = validateTask(task);
-    if (errors.length || !validDraft(draft, task)) {
-      toast("本地草稿已损坏或与当前格式不兼容", "error");
+    return { task, errors: validateTask(task) };
+  }
+
+  function listDraftHistory(limit = 12) {
+    const entries = [];
+    try {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key || !key.startsWith(STORAGE_PREFIX)) continue;
+        const draft = readStorage(key);
+        const parsed = taskFromDraft(draft);
+        if (!parsed.task || parsed.errors.length || !validDraft(draft, parsed.task)) continue;
+        const task = parsed.task;
+        const completed = Number.isInteger(draft.completed_subtask_count)
+          ? draft.completed_subtask_count
+          : task.candidates.filter((candidate) => mosAnswerComplete(draft.mos[candidate.id])).length
+            + task.eloMatches.filter((match) => eloAnswerComplete(draft.elo_matches[match.match_id])).length;
+        entries.push({
+          key,
+          draft,
+          task,
+          completed,
+          total: task.totalSubtaskCount,
+          updatedAt: draft.updated_at || ""
+        });
+      }
+    } catch (error) {
+      return [];
+    }
+    return entries
+      .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
+      .slice(0, limit);
+  }
+
+  function resumeDraftByKey(key) {
+    const draft = readStorage(key);
+    const parsed = taskFromDraft(draft);
+    if (!draft || !parsed.task || parsed.errors.length || !validDraft(draft, parsed.task)) {
+      toast("这条本机记录已损坏或与当前格式不兼容", "error");
       return;
     }
-    state.pasteText = U.serializeTSVRow(cells);
-    state.selectedModelCount = contract.modelCount;
-    writeModelCountPreference(contract.modelCount);
-    loadTask(task, null);
+    writeStorage(LAST_DRAFT_KEY, { key, updated_at: draft.updated_at || U.nowISO() });
+    state.pasteText = U.serializeTSVRow(parsed.task.cells);
+    state.selectedModelCount = parsed.task.modelCount;
+    writeModelCountPreference(parsed.task.modelCount);
+    loadTask(parsed.task, null);
+  }
+
+  function resumeLastDraft() {
+    const pointer = readStorage(LAST_DRAFT_KEY);
+    if (!pointer || !pointer.key) {
+      toast("没有可恢复的本地草稿", "error");
+      return;
+    }
+    resumeDraftByKey(pointer.key);
   }
 
   function renderTopbar(extra) {
@@ -1239,8 +1298,27 @@
     </div>`;
   }
 
+  function renderLocalDraftHistory(entries) {
+    if (!entries.length) return "";
+    const rows = entries.map((entry) => {
+      const complete = entry.completed === entry.total;
+      const exported = Boolean(entry.draft.result_exported);
+      return `<li class="local-history-row">
+        <div class="local-history-main"><strong>${h(entry.task.caseId)}</strong><span>${h(entry.task.batchId)} · ${h(entry.task.taskBundleId)}</span></div>
+        <div class="local-history-progress"><strong>${entry.completed}/${entry.total}</strong><span>${complete ? (exported ? "已完成并导出" : "已完成 · 尚未确认导出") : "进行中"}</span></div>
+        <time datetime="${h(entry.updatedAt)}">${h(formatTimestamp(entry.updatedAt))}</time>
+        <button type="button" class="button secondary compact" data-action="resume-draft-key" data-key="${h(entry.key)}">恢复记录</button>
+      </li>`;
+    }).join("");
+    return `<section class="local-history-card" aria-label="本机 Case 历史记录">
+      <div class="local-history-heading"><div>${icon("refresh", 18)}<span><strong>本机 Case 历史</strong><small>可以恢复尚未复制 JSON 就离开的 Case；仅保存在当前浏览器。</small></span></div><span>${entries.length} 条</span></div>
+      <ul class="local-history-list">${rows}</ul>
+      <p>${icon("shield", 13)} 历史记录只包含脱敏工单与评分。恢复后仍需在结果页复制或下载 JSON，清理浏览器数据后无法找回。</p>
+    </section>`;
+  }
+
   function renderImport() {
-    const draft = lastDraft();
+    const draftHistory = listDraftHistory();
     const qualityMode = state.importMode === "quality";
     root.innerHTML = `<div class="review-shell import-shell">
       ${renderTopbar("")}
@@ -1257,10 +1335,7 @@
             <span class="task-summary-item task-summary-total"><b>3–21</b><span><strong>子任务</strong><small>按模型数自动计算</small></span></span>
           </div>
         </section>
-        ${draft ? `<section class="draft-banner">
-          <div>${icon("refresh", 18)}<span><strong>发现未结束的本地草稿</strong><small>仅保存匿名工单与评分，不包含任何来源映射。</small></span></div>
-          <button class="button secondary" data-action="resume-draft">恢复草稿</button>
-        </section>` : ""}
+        ${renderLocalDraftHistory(draftHistory)}
         <section class="import-card">
           <div class="mode-switch" role="tablist" aria-label="工作模式">
             <button class="mode-option ${qualityMode ? "" : "is-active"}" data-action="set-import-mode" data-mode="annotate" role="tab" aria-selected="${!qualityMode}"><strong>标注模式</strong><span>选择 2–6 个模型并粘贴工单</span></button>
@@ -1500,7 +1575,7 @@
           </section>
         </div>
         <section class="result-continuation">
-          <div><span class="eyebrow">NEXT CASE</span><strong>继续处理下一条 Case</strong><small>${qualityMode ? "返回质检主页，粘贴下一条自包含结果 JSON。" : "返回标注主页，粘贴下一条动态列脱敏工单。"}</small></div>
+          <div><span class="eyebrow">NEXT CASE</span><strong>继续处理下一条 Case</strong><small>${qualityMode ? "返回质检主页，粘贴下一条自包含结果 JSON。" : "返回标注主页，粘贴下一条动态列脱敏工单。"}</small><small class="result-export-state ${state.resultExported ? "is-exported" : ""}" data-result-export-state>${state.resultExported ? `${icon("checkCircle", 13)} 已复制或下载；可以继续下一条 Case` : `${icon("warning", 13)} 尚未复制或下载结果；离开前会再次提醒，本机历史仍可恢复`}</small></div>
           <button type="button" class="button secondary" data-action="new-case">导入新 Case ${icon("arrowRight", 16)}</button>
         </section>
       </main>
@@ -1705,8 +1780,10 @@
   }
 
   function startNewCase() {
+    if (state.exportResult && !state.resultExported
+      && !window.confirm("这条 Case 的结果尚未复制或下载。评分已保存在本机历史中，仍要继续导入新 Case 吗？")) return;
+    flushDraftSave();
     const nextMode = state.workMode === "quality" || state.loadedHistory ? "quality" : "annotate";
-    clearLastDraftPointer();
     state.screen = "import";
     state.importMode = nextMode;
     state.workMode = nextMode;
@@ -1720,6 +1797,7 @@
     state.baseline = null;
     state.loadedHistory = false;
     state.exportResult = null;
+    state.resultExported = false;
     state.restoredDraft = false;
     state.sourceAnnotation = null;
     state.railScrollTop = 0;
@@ -1737,21 +1815,21 @@
     if (event.target.id === "work-order-input") state.pasteText = event.target.value;
     if (event.target.dataset.role === "mos-note") {
       state.mos[event.target.dataset.id].notes[event.target.dataset.dimension] = event.target.value;
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       clearMissingHighlights();
       refreshWorkspaceStatus();
     }
     if (event.target.dataset.role === "instruction-note") {
       state.mos[event.target.dataset.id].instruction_note = event.target.value;
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       clearMissingHighlights();
       refreshWorkspaceStatus();
     }
     if (event.target.dataset.role === "elo-note") {
       state.eloMatches[event.target.dataset.match].note = event.target.value;
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       refreshQualityAuditRegion();
     }
@@ -1787,6 +1865,7 @@
     if (action === "demo-history") return loadDemo(true);
     if (action === "demo-quality") return loadQualityDemo();
     if (action === "resume-draft") return resumeLastDraft();
+    if (action === "resume-draft-key") return resumeDraftByKey(target.dataset.key);
     if (action === "toggle-autoplay") {
       state.autoPlayFirstAudio = !state.autoPlayFirstAudio;
       writeAutoPlayPreference(state.autoPlayFirstAudio);
@@ -1835,7 +1914,7 @@
       const score = Number(target.dataset.score);
       const answer = state.mos[target.dataset.id];
       answer.scores[target.dataset.dimension] = score;
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       return refreshMosDimension(target.closest(".dimension-block"), target.dataset.id, target.dataset.dimension);
     }
@@ -1846,7 +1925,7 @@
       answer.low_score_issues[target.dataset.dimension] = selected.includes(target.dataset.issue)
         ? selected.filter((item) => item !== target.dataset.issue)
         : selected.concat(target.dataset.issue);
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       return refreshIssuePanel(target.closest(".issue-panel"), target.dataset.id, target.dataset.dimension);
     }
@@ -1856,7 +1935,7 @@
       answer.instruction_deductions = answer.instruction_deductions.includes(target.dataset.issue)
         ? answer.instruction_deductions.filter((item) => item !== target.dataset.issue)
         : answer.instruction_deductions.concat(target.dataset.issue);
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       const panel = target.closest(".instruction-issues");
       if (panel) replaceHtml(panel, renderInstructionDeductions(target.dataset.id, answer));
@@ -1869,7 +1948,7 @@
       }
       clearMissingHighlights();
       state.eloMatches[target.dataset.match].dimension_results[target.dataset.dimension] = target.dataset.outcome;
-      state.exportResult = null;
+      invalidateExportResult();
       scheduleDraftSave();
       return refreshEloOutcomeButtons(target.closest(".elo-outcomes"), target.dataset.outcome);
     }
@@ -1897,11 +1976,17 @@
       return render();
     }
     if (action === "copy-json") {
-      return U.copyText(JSON.stringify(state.exportResult)).then(() => toast("结果 JSON 已复制", "success")).catch(() => toast("复制失败，请从预览区手动复制", "error"));
+      return U.copyText(JSON.stringify(state.exportResult)).then(() => {
+        markResultExported();
+        toast("结果 JSON 已复制", "success");
+      }).catch(() => toast("复制失败，请从预览区手动复制", "error"));
     }
     if (action === "copy-row") {
       const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
-      return U.copyText(U.serializeTSVRow(cells)).then(() => toast(`结果行已复制${(state.task.trailingCells || []).length ? "，右侧附加信息已保留" : ""}`, "success")).catch(() => toast("复制失败，请改用结果 JSON", "error"));
+      return U.copyText(U.serializeTSVRow(cells)).then(() => {
+        markResultExported();
+        toast(`结果行已复制${(state.task.trailingCells || []).length ? "，右侧附加信息已保留" : ""}`, "success");
+      }).catch(() => toast("复制失败，请改用结果 JSON", "error"));
     }
     if (action === "download-row-csv") {
       const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
@@ -1910,11 +1995,13 @@
         `\uFEFF${U.serializeCSVRow(cells)}`,
         "text/csv;charset=utf-8"
       );
+      markResultExported();
       return toast("结果 CSV 已下载", "success");
     }
     if (action === "download-json") {
       const filename = `${U.fileSafe(state.task.caseId)}-anonymous-review.json`;
       U.downloadText(filename, JSON.stringify(state.exportResult, null, 2), "application/json;charset=utf-8");
+      markResultExported();
       return toast("JSON 文件已下载", "success");
     }
   });
