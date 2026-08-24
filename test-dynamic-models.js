@@ -119,7 +119,7 @@ function testReviewer(line, modelCount) {
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
     "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
     "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "resumeDraftByKey", "listDraftHistory", "startNewCase", "currentMissingItems",
-    "finalResultForSheet", "exportTimestamp"
+    "finalResultForSheet", "resultExportBundle", "exportTimestamp"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -199,17 +199,25 @@ function testReviewer(line, modelCount) {
   api.state.finalSnapshot = null;
   api.state.screen = "result";
   api.render();
-  assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "result page must clearly label the history-free result");
+  assert(root.innerHTML.includes("完整审计 JSON（推荐）"), "result page must prefer the full audit result when it fits");
+  assert.strictEqual(api.resultExportBundle().preferFull, true, "full audit result must be the default below 50,000 characters");
   assert(root.innerHTML.includes("下载完整审计 JSON"), "result page must provide the separately archived full result");
   assert(root.innerHTML.includes("revision_history 与 revision_remark"), "result page must precisely explain what the final snapshot omits");
   assert.strictEqual(context.SB_SHARED_DATA.RESULT_CELL_CHAR_LIMIT, 50000, "spreadsheet result limit must be 50,000 characters");
-  assert(root.innerHTML.includes("未超过 5 万"), "ordinary result JSON must be measured against the 50,000-character limit");
+  assert(root.innerHTML.includes("完整审计 JSON 未超过 5 万"), "ordinary result JSON must explain why the full audit result is preferred");
+  const oversizedHistoryResult = JSON.parse(JSON.stringify(annotation));
+  oversizedHistoryResult.revision_history = [{ revision: 1, updated_at: oversizedHistoryResult.updated_at, remark: "历史记录".repeat(20000), changes: [] }];
+  api.state.exportResult = oversizedHistoryResult;
+  api.state.finalSnapshot = null;
+  api.render();
+  assert.strictEqual(api.resultExportBundle().preferFull, false, "refined result must become preferred only when full audit history exceeds the limit");
+  assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "result page must switch its recommendation when audit history causes overflow");
   const oversizedResult = JSON.parse(JSON.stringify(annotation));
   oversizedResult.work_order.tag = "超长内容".repeat(15000);
   api.state.exportResult = oversizedResult;
   api.state.finalSnapshot = null;
   api.render();
-  assert(root.innerHTML.includes("已超过 5 万"), "result page must warn when the refined JSON exceeds 50,000 characters");
+  assert(root.innerHTML.includes("完整与精简结果均超过 5 万"), "result page must warn when even the refined JSON exceeds 50,000 characters");
   api.state.exportResult = annotation;
   api.state.finalSnapshot = null;
   api.state.screen = "import";

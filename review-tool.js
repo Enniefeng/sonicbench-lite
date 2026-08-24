@@ -1072,6 +1072,23 @@
     return state.finalSnapshot;
   }
 
+  function resultExportBundle() {
+    const fullResult = state.exportResult || createAnnotation();
+    const refinedResult = finalResultForSheet();
+    const fullText = JSON.stringify(fullResult);
+    const refinedText = JSON.stringify(refinedResult);
+    const preferFull = fullText.length <= RESULT_CELL_CHAR_LIMIT;
+    return {
+      fullResult,
+      refinedResult,
+      fullText,
+      refinedText,
+      preferFull,
+      preferredResult: preferFull ? fullResult : refinedResult,
+      preferredText: preferFull ? fullText : refinedText
+    };
+  }
+
   function exportTimestamp() {
     const date = new Date();
     const pad = (value) => String(value).padStart(2, "0");
@@ -1565,13 +1582,16 @@
   function renderResult() {
     const result = state.exportResult || createAnnotation();
     state.exportResult = result;
-    const cellResult = finalResultForSheet();
-    const cellText = JSON.stringify(cellResult);
-    const fullLength = JSON.stringify(result).length;
-    const withinCellLimit = cellText.length <= RESULT_CELL_CHAR_LIMIT;
-    const cellLimitNotice = withinCellLimit
-      ? `未超过 5 万：当前 ${cellText.length.toLocaleString()} 字符，可写入飞书单元格。`
-      : `已超过 5 万：当前 ${cellText.length.toLocaleString()} 字符，飞书单元格可能无法完整保存。`;
+    const exportBundle = resultExportBundle();
+    const preferredResult = exportBundle.preferredResult;
+    const preferredText = exportBundle.preferredText;
+    const withinCellLimit = preferredText.length <= RESULT_CELL_CHAR_LIMIT;
+    const resultHeading = exportBundle.preferFull ? "完整审计 JSON（推荐）" : "精简结果 JSON（无修改历史）";
+    const cellLimitNotice = exportBundle.preferFull
+      ? `完整审计 JSON 未超过 5 万：当前 ${exportBundle.fullText.length.toLocaleString()} 字符，已优先保留全部修改历史。`
+      : withinCellLimit
+        ? `完整审计 JSON 为 ${exportBundle.fullText.length.toLocaleString()} 字符，已超过 5 万；推荐精简结果 ${exportBundle.refinedText.length.toLocaleString()} 字符。`
+        : `完整与精简结果均超过 5 万：精简结果当前 ${exportBundle.refinedText.length.toLocaleString()} 字符。`;
     const qualityMode = state.workMode === "quality" || state.loadedHistory;
     root.innerHTML = `<div class="review-shell">
       ${renderTopbar(`<button class="button ghost compact" data-action="back-task">${icon("arrowLeft", 15)} 返回检查</button>`)}
@@ -1589,16 +1609,17 @@
             ${state.loadedHistory ? `<div class="revision-summary"><span>检查修订</span><strong>Revision ${result.result_revision}</strong><small>${h(result.revision_remark || (changedCount() ? `本次修改 ${changedCount()} 处` : "本次未修改原答案"))}</small></div>` : ""}
           </section>
           <section class="json-card">
-            <div class="card-heading"><div><h2>精简结果 JSON（无修改历史）</h2><span>${cellText.length.toLocaleString()} 字符 · 完整文件 ${fullLength.toLocaleString()} 字符</span></div><span class="mono">${h(cellResult.schema_version)}</span></div>
+            <div class="card-heading"><div><h2>${h(resultHeading)}</h2><span>完整审计 ${exportBundle.fullText.length.toLocaleString()} 字符 · 精简结果 ${exportBundle.refinedText.length.toLocaleString()} 字符</span></div><span class="mono">${h(preferredResult.schema_version)}</span></div>
             <div class="cell-limit-status ${withinCellLimit ? "is-within" : "is-over"}">${icon(withinCellLimit ? "checkCircle" : "warning", 16)}<strong>${h(cellLimitNotice)}</strong></div>
-            <pre class="json-preview"><code>${h(JSON.stringify(cellResult, null, 2))}</code></pre>
+            <pre class="json-preview"><code>${h(JSON.stringify(preferredResult, null, 2))}</code></pre>
             <div class="result-actions">
-              <button class="button primary" data-action="copy-json">${icon("copy", 16)} 复制精简结果 JSON</button>
+              <button class="button primary" data-action="copy-json">${icon("copy", 16)} ${exportBundle.preferFull ? "复制完整审计 JSON（推荐）" : "复制精简结果 JSON（推荐）"}</button>
               <button class="button secondary" data-action="copy-row">${icon("table", 16)} 复制完整工单行</button>
               <button class="button secondary" data-action="download-row-csv">${icon("file-spreadsheet", 16)} 下载结果 CSV</button>
               <button class="button ghost" data-action="download-json">${icon("download", 16)} 下载完整审计 JSON</button>
+              <button class="button ghost" data-action="download-refined-json">${icon("download", 16)} 下载精简结果 JSON</button>
             </div>
-            <p class="result-tip">精简结果 JSON 与首次标注格式完全一致，仅删除 revision_history 与 revision_remark，保留 result_revision；完整审计 JSON 仍保留全部修改过程。</p>
+            <p class="result-tip">系统始终优先使用完整审计 JSON；仅当它超过 5 万字符时，复制 JSON、复制工单行与结果 CSV 才会自动改用精简结果。精简结果仅删除 revision_history 与 revision_remark，保留 result_revision。</p>
           </section>
         </div>
         <section class="result-continuation">
@@ -2005,21 +2026,22 @@
       return render();
     }
     if (action === "copy-json") {
-      return U.copyText(JSON.stringify(finalResultForSheet())).then(() => {
+      const exportBundle = resultExportBundle();
+      return U.copyText(exportBundle.preferredText).then(() => {
         markResultExported();
-        const length = JSON.stringify(finalResultForSheet()).length;
-        toast(length <= RESULT_CELL_CHAR_LIMIT ? `精简结果 JSON 已复制（${length} 字符，未超过 5 万）` : `精简结果 JSON 已复制，但当前 ${length} 字符，已超过 5 万`, length <= RESULT_CELL_CHAR_LIMIT ? "success" : "error");
+        const label = exportBundle.preferFull ? "完整审计 JSON" : "精简结果 JSON";
+        toast(`${label} 已复制（${exportBundle.preferredText.length} 字符${exportBundle.preferredText.length <= RESULT_CELL_CHAR_LIMIT ? "，未超过 5 万" : "，已超过 5 万"}）`, exportBundle.preferredText.length <= RESULT_CELL_CHAR_LIMIT ? "success" : "error");
       }).catch(() => toast("复制失败，请从预览区手动复制", "error"));
     }
     if (action === "copy-row") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(finalResultForSheet()), state.task.trailingCells || []);
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(resultExportBundle().preferredText, state.task.trailingCells || []);
       return U.copyText(U.serializeTSVRow(cells)).then(() => {
         markResultExported();
         toast(`结果行已复制${(state.task.trailingCells || []).length ? "，右侧附加信息已保留" : ""}`, "success");
       }).catch(() => toast("复制失败，请改用结果 JSON", "error"));
     }
     if (action === "download-row-csv") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(finalResultForSheet()), state.task.trailingCells || []);
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(resultExportBundle().preferredText, state.task.trailingCells || []);
       U.downloadText(
         `${U.fileSafe(state.task.caseId)}-completed-work-order.csv`,
         `\uFEFF${U.serializeCSVRow(cells)}`,
@@ -2033,6 +2055,12 @@
       U.downloadText(filename, JSON.stringify(state.exportResult, null, 2), "application/json;charset=utf-8");
       markResultExported();
       return toast("完整审计 JSON 已下载", "success");
+    }
+    if (action === "download-refined-json") {
+      const filename = `${U.fileSafe(state.task.caseId)}_${exportTimestamp()}-refined.json`;
+      U.downloadText(filename, JSON.stringify(finalResultForSheet(), null, 2), "application/json;charset=utf-8");
+      markResultExported();
+      return toast("精简结果 JSON 已下载", "success");
     }
   });
 
