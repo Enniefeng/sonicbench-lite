@@ -202,7 +202,16 @@ function testReviewer(line, modelCount) {
   assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "result page must clearly label the history-free result");
   assert(root.innerHTML.includes("下载完整审计 JSON"), "result page must provide the separately archived full result");
   assert(root.innerHTML.includes("revision_history 与 revision_remark"), "result page must precisely explain what the final snapshot omits");
-  assert(root.innerHTML.includes(modelCount === 6 ? "已超过 5K" : "5K"), "result page must always report the spreadsheet character-limit status");
+  assert.strictEqual(context.SB_SHARED_DATA.RESULT_CELL_CHAR_LIMIT, 50000, "spreadsheet result limit must be 50,000 characters");
+  assert(root.innerHTML.includes("未超过 5 万"), "ordinary result JSON must be measured against the 50,000-character limit");
+  const oversizedResult = JSON.parse(JSON.stringify(annotation));
+  oversizedResult.work_order.tag = "超长内容".repeat(15000);
+  api.state.exportResult = oversizedResult;
+  api.state.finalSnapshot = null;
+  api.render();
+  assert(root.innerHTML.includes("已超过 5 万"), "result page must warn when the refined JSON exceeds 50,000 characters");
+  api.state.exportResult = annotation;
+  api.state.finalSnapshot = null;
   api.state.screen = "import";
   api.state.importMode = "annotate";
   api.state.pasteText = context.SB_UTILS.serializeTSVRow(lineCells.slice(0, -1));

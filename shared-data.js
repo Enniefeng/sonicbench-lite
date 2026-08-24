@@ -67,6 +67,7 @@
   const WORK_ORDER_SCHEMA = "sonicbench-work-order/flexible-model/1.0";
   const REVIEW_SCHEMA = "sonicbench-annotation-result/flexible-model/1.0";
   const MAPPING_SCHEMA = "sonicbench-mapping/flexible-model/1.0";
+  const RESULT_CELL_CHAR_LIMIT = 50000;
 
   function finalSnapshotResult(annotation) {
     if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
@@ -171,6 +172,7 @@
       WORK_ORDER_SCHEMA,
       REVIEW_SCHEMA,
       MAPPING_SCHEMA,
+      RESULT_CELL_CHAR_LIMIT,
       finalSnapshotResult,
       isSupportedModelCount,
       eloMatchCount,

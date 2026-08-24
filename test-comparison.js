@@ -93,7 +93,8 @@ assert.deepStrictEqual(refinedResult.admin_quality_review, correctedResult.admin
 assert(/^\d{8}-\d{6}$/.test(api.exportTimestamp()), "administrator result filenames need a filesystem-safe timestamp");
 assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "comparison page must clearly distinguish the history-free result");
 assert(root.innerHTML.includes("下载完整审计 JSON"), "comparison page must preserve a full revision-history download");
-assert(root.innerHTML.includes("5K"), "comparison page must display the spreadsheet character-limit status");
+assert.strictEqual(context.SB_SHARED_DATA.RESULT_CELL_CHAR_LIMIT, 50000, "spreadsheet result limit must be 50,000 characters");
+assert(root.innerHTML.includes("未超过 5 万"), "comparison page must display the 50,000-character status");
 assert(root.innerHTML.includes("下载对比长图 PNG"), "comparison page must provide a PNG long-image export");
 assert(root.innerHTML.includes("Case 音频试听"), "comparison page must provide a dedicated case audio panel");
 assert(root.innerHTML.includes('class="comparison-audio-player"'), "valid candidate URLs must render playable audio controls");

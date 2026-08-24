@@ -12,6 +12,7 @@
   const MAX_MODEL_COUNT = D.MAX_MODEL_COUNT || 6;
   const WORK_ORDER_SCHEMA = D.WORK_ORDER_SCHEMA || "sonicbench-work-order/flexible-model/1.0";
   const RESULT_SCHEMA = D.REVIEW_SCHEMA || "sonicbench-annotation-result/flexible-model/1.0";
+  const RESULT_CELL_CHAR_LIMIT = Number(D.RESULT_CELL_CHAR_LIMIT) || 50000;
   const MOS_GROUPS = Array.isArray(D.MOS_GROUPS) ? D.MOS_GROUPS : [];
   const DIMENSIONS = Array.isArray(D.MOS_DIMENSIONS) ? D.MOS_DIMENSIONS : [];
   const INSTRUCTION_DIMENSION = D.INSTRUCTION_DIMENSION || { key: "instruction_following", label: "指令遵循" };
@@ -1567,10 +1568,10 @@
     const cellResult = finalResultForSheet();
     const cellText = JSON.stringify(cellResult);
     const fullLength = JSON.stringify(result).length;
-    const withinCellLimit = cellText.length <= 5000;
+    const withinCellLimit = cellText.length <= RESULT_CELL_CHAR_LIMIT;
     const cellLimitNotice = withinCellLimit
-      ? `未超过 5K：当前 ${cellText.length.toLocaleString()} 字符，可写入飞书单元格。`
-      : `已超过 5K：当前 ${cellText.length.toLocaleString()} 字符，飞书单元格可能无法完整保存。`;
+      ? `未超过 5 万：当前 ${cellText.length.toLocaleString()} 字符，可写入飞书单元格。`
+      : `已超过 5 万：当前 ${cellText.length.toLocaleString()} 字符，飞书单元格可能无法完整保存。`;
     const qualityMode = state.workMode === "quality" || state.loadedHistory;
     root.innerHTML = `<div class="review-shell">
       ${renderTopbar(`<button class="button ghost compact" data-action="back-task">${icon("arrowLeft", 15)} 返回检查</button>`)}
@@ -2007,7 +2008,7 @@
       return U.copyText(JSON.stringify(finalResultForSheet())).then(() => {
         markResultExported();
         const length = JSON.stringify(finalResultForSheet()).length;
-        toast(length <= 5000 ? `精简结果 JSON 已复制（${length} 字符，未超过 5K）` : `精简结果 JSON 已复制，但当前 ${length} 字符，已超过 5K`, length <= 5000 ? "success" : "error");
+        toast(length <= RESULT_CELL_CHAR_LIMIT ? `精简结果 JSON 已复制（${length} 字符，未超过 5 万）` : `精简结果 JSON 已复制，但当前 ${length} 字符，已超过 5 万`, length <= RESULT_CELL_CHAR_LIMIT ? "success" : "error");
       }).catch(() => toast("复制失败，请从预览区手动复制", "error"));
     }
     if (action === "copy-row") {
