@@ -118,7 +118,8 @@ function testReviewer(line, modelCount) {
   vm.runInContext(instrument("review-tool.js", "__REVIEW_TEST__", [
     "state", "parseWorkOrder", "parseResultJson", "completeAnnotationForDemo", "loadTask", "validateAnnotation", "render",
     "initializeAudioPlayers", "autoPlayCurrentTask", "collectChanges", "createAnnotation", "adoptExportedRevision",
-    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "resumeDraftByKey", "listDraftHistory", "startNewCase", "currentMissingItems"
+    "readModelCountPreference", "writeModelCountPreference", "saveDraft", "resumeLastDraft", "resumeDraftByKey", "listDraftHistory", "startNewCase", "currentMissingItems",
+    "finalResultForSheet", "exportTimestamp"
   ]), context, { filename: "review-tool.js" });
   const api = context.__REVIEW_TEST__;
   assert(root.innerHTML.includes("import-task-summary"), "review import must use the responsive task summary");
@@ -175,8 +176,33 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(annotation.total_subtask_count, parsed.task.totalSubtaskCount);
   assert.deepStrictEqual(Array.from(api.validateAnnotation(annotation, parsed.task)), []);
 
+  const finalSnapshot = context.SB_SHARED_DATA.finalSnapshotResult(annotation);
+  const expectedSnapshot = JSON.parse(JSON.stringify(annotation));
+  delete expectedSnapshot.revision_history;
+  delete expectedSnapshot.revision_remark;
+  assert.strictEqual(JSON.stringify(finalSnapshot), JSON.stringify(expectedSnapshot), "final snapshot must only remove revision history and its remark");
+  assert.strictEqual(finalSnapshot.schema_version, annotation.schema_version, "final snapshot must keep the original annotation schema");
+  assert.strictEqual(finalSnapshot.result_revision, annotation.result_revision, "final snapshot must retain the revision number");
+  assert.strictEqual(JSON.stringify(finalSnapshot.work_order), JSON.stringify(annotation.work_order), "final snapshot must retain the complete work-order context");
+  assert.deepStrictEqual(Array.from(api.validateAnnotation(finalSnapshot, parsed.task)), [], "final snapshot must remain a standard valid annotation");
+  const snapshotCells = lineCells.slice();
+  snapshotCells[snapshotCells.length - 1] = JSON.stringify(finalSnapshot);
+  const parsedSnapshotRow = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(snapshotCells), modelCount);
+  assert.deepStrictEqual(Array.from(parsedSnapshotRow.errors), [], "a work-order row must restore the final snapshot without translation");
+  assert.strictEqual(parsedSnapshotRow.annotation.result_revision, annotation.result_revision);
+  assert.deepStrictEqual(Array.from(api.parseResultJson(JSON.stringify(finalSnapshot)).errors), [], "standalone final snapshot must remain usable for quality review");
+  assert(/^\d{8}-\d{6}$/.test(api.exportTimestamp()), "audit JSON filenames need a filesystem-safe timestamp");
+
   api.loadTask(parsed.task, annotation, { skipDraft: true, workMode: "quality" });
   assert.strictEqual(api.state.loadedHistory, true, "a pasted result must load its explicit history");
+  api.state.exportResult = annotation;
+  api.state.finalSnapshot = null;
+  api.state.screen = "result";
+  api.render();
+  assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "result page must clearly label the history-free result");
+  assert(root.innerHTML.includes("下载完整审计 JSON"), "result page must provide the separately archived full result");
+  assert(root.innerHTML.includes("revision_history 与 revision_remark"), "result page must precisely explain what the final snapshot omits");
+  assert(root.innerHTML.includes(modelCount === 6 ? "已超过 5K" : "5K"), "result page must always report the spreadsheet character-limit status");
   api.state.screen = "import";
   api.state.importMode = "annotate";
   api.state.pasteText = context.SB_UTILS.serializeTSVRow(lineCells.slice(0, -1));

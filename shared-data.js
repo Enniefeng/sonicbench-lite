@@ -68,6 +68,16 @@
   const REVIEW_SCHEMA = "sonicbench-annotation-result/flexible-model/1.0";
   const MAPPING_SCHEMA = "sonicbench-mapping/flexible-model/1.0";
 
+  function finalSnapshotResult(annotation) {
+    if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
+      throw new Error("只能从完整评测结果生成最终态快照");
+    }
+    const snapshot = JSON.parse(JSON.stringify(annotation));
+    delete snapshot.revision_history;
+    delete snapshot.revision_remark;
+    return snapshot;
+  }
+
   function isSupportedModelCount(value) {
     return Number.isInteger(value) && value >= MIN_MODEL_COUNT && value <= MAX_MODEL_COUNT;
   }
@@ -161,6 +171,7 @@
       WORK_ORDER_SCHEMA,
       REVIEW_SCHEMA,
       MAPPING_SCHEMA,
+      finalSnapshotResult,
       isSupportedModelCount,
       eloMatchCount,
       workOrderColumnCount,

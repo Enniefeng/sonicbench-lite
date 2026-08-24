@@ -80,6 +80,7 @@
     baseline: null,
     loadedHistory: false,
     exportResult: null,
+    finalSnapshot: null,
     resultExported: false,
     restoredDraft: false,
     sourceAnnotation: null,
@@ -95,6 +96,7 @@
 
   function invalidateExportResult() {
     state.exportResult = null;
+    state.finalSnapshot = null;
     state.resultExported = false;
   }
 
@@ -731,6 +733,7 @@
     state.currentIndex = 0;
     state.startedAt = annotation && annotation.started_at ? annotation.started_at : U.nowISO();
     state.exportResult = null;
+    state.finalSnapshot = null;
     state.resultExported = false;
     state.restoredDraft = false;
     state.validationOpen = false;
@@ -748,6 +751,7 @@
         state.baseline = draft.baseline || null;
         state.loadedHistory = Boolean(draft.loaded_history);
         state.exportResult = draft.export_result ? clone(draft.export_result) : null;
+        state.finalSnapshot = null;
         state.resultExported = Boolean(draft.result_exported);
         state.restoredDraft = true;
       }
@@ -1057,6 +1061,20 @@
       revision_remark: revision.entry.remark,
       revision_history: revision.history
     };
+  }
+
+  function finalResultForSheet() {
+    if (!state.finalSnapshot) {
+      if (typeof D.finalSnapshotResult !== "function") throw new Error("缺少精简结果生成能力");
+      state.finalSnapshot = D.finalSnapshotResult(state.exportResult || createAnnotation());
+    }
+    return state.finalSnapshot;
+  }
+
+  function exportTimestamp() {
+    const date = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
   }
 
   function completeAnnotationForDemo(task) {
@@ -1546,7 +1564,13 @@
   function renderResult() {
     const result = state.exportResult || createAnnotation();
     state.exportResult = result;
-    const compact = JSON.stringify(result);
+    const cellResult = finalResultForSheet();
+    const cellText = JSON.stringify(cellResult);
+    const fullLength = JSON.stringify(result).length;
+    const withinCellLimit = cellText.length <= 5000;
+    const cellLimitNotice = withinCellLimit
+      ? `未超过 5K：当前 ${cellText.length.toLocaleString()} 字符，可写入飞书单元格。`
+      : `已超过 5K：当前 ${cellText.length.toLocaleString()} 字符，飞书单元格可能无法完整保存。`;
     const qualityMode = state.workMode === "quality" || state.loadedHistory;
     root.innerHTML = `<div class="review-shell">
       ${renderTopbar(`<button class="button ghost compact" data-action="back-task">${icon("arrowLeft", 15)} 返回检查</button>`)}
@@ -1558,21 +1582,22 @@
             <ul class="completion-list">
               <li>${icon("checkCircle", 18)}<span><strong>${state.task.modelCount} / ${state.task.modelCount} MOS</strong><small>${state.task.modelCount} 个匿名音频均完成整体维度、子维度与必填反馈</small></span></li>
               <li>${icon("checkCircle", 18)}<span><strong>${state.task.eloMatchCount} / ${state.task.eloMatchCount} ELO 对战</strong><small>${state.task.eloMatchCount} 组对战均完成四维胜／平／负判断</small></span></li>
-              <li>${icon("shield", 18)}<span><strong>自包含脱敏任务</strong><small>包含匿名 ID 与音频 URL，但不写入真实模型来源 Mapping</small></span></li>
+              <li>${icon("shield", 18)}<span><strong>完整审计 JSON + 精简结果 JSON</strong><small>两份结果结构一致；精简结果不含修改历史，保留 Revision 编号</small></span></li>
               <li>${icon("file", 18)}<span><strong class="mono">FP ${h(state.task.fingerprint)}</strong><small>用于回填时检测错行</small></span></li>
             </ul>
             ${state.loadedHistory ? `<div class="revision-summary"><span>检查修订</span><strong>Revision ${result.result_revision}</strong><small>${h(result.revision_remark || (changedCount() ? `本次修改 ${changedCount()} 处` : "本次未修改原答案"))}</small></div>` : ""}
           </section>
           <section class="json-card">
-            <div class="card-heading"><div><h2>自包含结果 JSON</h2><span>${compact.length.toLocaleString()} characters</span></div><span class="mono">${h(result.schema_version || RESULT_SCHEMA)}</span></div>
-            <pre class="json-preview"><code>${h(JSON.stringify(result, null, 2))}</code></pre>
+            <div class="card-heading"><div><h2>精简结果 JSON（无修改历史）</h2><span>${cellText.length.toLocaleString()} 字符 · 完整文件 ${fullLength.toLocaleString()} 字符</span></div><span class="mono">${h(cellResult.schema_version)}</span></div>
+            <div class="cell-limit-status ${withinCellLimit ? "is-within" : "is-over"}">${icon(withinCellLimit ? "checkCircle" : "warning", 16)}<strong>${h(cellLimitNotice)}</strong></div>
+            <pre class="json-preview"><code>${h(JSON.stringify(cellResult, null, 2))}</code></pre>
             <div class="result-actions">
-              <button class="button primary" data-action="copy-json">${icon("copy", 16)} 复制结果 JSON</button>
+              <button class="button primary" data-action="copy-json">${icon("copy", 16)} 复制精简结果 JSON</button>
               <button class="button secondary" data-action="copy-row">${icon("table", 16)} 复制完整工单行</button>
               <button class="button secondary" data-action="download-row-csv">${icon("file-spreadsheet", 16)} 下载结果 CSV</button>
-              <button class="button ghost" data-action="download-json">${icon("download", 16)} 下载 JSON</button>
+              <button class="button ghost" data-action="download-json">${icon("download", 16)} 下载完整审计 JSON</button>
             </div>
-            <p class="result-tip">此 JSON 已包含 Case、Tag、Lyrics、匿名音频 ID + URL 与 ELO 顺序信息，可直接交给质检人员载入；也可写回 Excel 最后一列。</p>
+            <p class="result-tip">精简结果 JSON 与首次标注格式完全一致，仅删除 revision_history 与 revision_remark，保留 result_revision；完整审计 JSON 仍保留全部修改过程。</p>
           </section>
         </div>
         <section class="result-continuation">
@@ -1777,6 +1802,7 @@
     state.baseline = annotationToAnswers(state.exportResult, state.task);
     state.task.cells[state.task.resultIndex] = JSON.stringify(state.exportResult);
     state.exportResult = null;
+    state.finalSnapshot = null;
     saveDraft();
   }
 
@@ -1798,6 +1824,7 @@
     state.baseline = null;
     state.loadedHistory = false;
     state.exportResult = null;
+    state.finalSnapshot = null;
     state.resultExported = false;
     state.restoredDraft = false;
     state.sourceAnnotation = null;
@@ -1977,20 +2004,21 @@
       return render();
     }
     if (action === "copy-json") {
-      return U.copyText(JSON.stringify(state.exportResult)).then(() => {
+      return U.copyText(JSON.stringify(finalResultForSheet())).then(() => {
         markResultExported();
-        toast("结果 JSON 已复制", "success");
+        const length = JSON.stringify(finalResultForSheet()).length;
+        toast(length <= 5000 ? `精简结果 JSON 已复制（${length} 字符，未超过 5K）` : `精简结果 JSON 已复制，但当前 ${length} 字符，已超过 5K`, length <= 5000 ? "success" : "error");
       }).catch(() => toast("复制失败，请从预览区手动复制", "error"));
     }
     if (action === "copy-row") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(finalResultForSheet()), state.task.trailingCells || []);
       return U.copyText(U.serializeTSVRow(cells)).then(() => {
         markResultExported();
         toast(`结果行已复制${(state.task.trailingCells || []).length ? "，右侧附加信息已保留" : ""}`, "success");
       }).catch(() => toast("复制失败，请改用结果 JSON", "error"));
     }
     if (action === "download-row-csv") {
-      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(state.exportResult), state.task.trailingCells || []);
+      const cells = state.task.cells.slice(0, state.task.resultIndex).concat(JSON.stringify(finalResultForSheet()), state.task.trailingCells || []);
       U.downloadText(
         `${U.fileSafe(state.task.caseId)}-completed-work-order.csv`,
         `\uFEFF${U.serializeCSVRow(cells)}`,
@@ -2000,10 +2028,10 @@
       return toast("结果 CSV 已下载", "success");
     }
     if (action === "download-json") {
-      const filename = `${U.fileSafe(state.task.caseId)}-anonymous-review.json`;
+      const filename = `${U.fileSafe(state.task.caseId)}_${exportTimestamp()}.json`;
       U.downloadText(filename, JSON.stringify(state.exportResult, null, 2), "application/json;charset=utf-8");
       markResultExported();
-      return toast("JSON 文件已下载", "success");
+      return toast("完整审计 JSON 已下载", "success");
     }
   });
 

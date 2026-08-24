@@ -442,6 +442,11 @@ to{opacity:1;transform:translateY(0);}
 .json-card .card-heading > div{display:grid;gap:1px;}
 .json-preview{max-height:440px;overflow:auto;margin:15px 0;padding:15px;border:1px solid rgba(255,255,255,0.08);border-radius:11px;background:var(--plum-950);color:#d8d1e3;font-size:10px;line-height:1.65;white-space:pre-wrap;word-break:break-word;}
 .result-actions{align-items:stretch;}
+.cell-limit-status{display:flex;align-items:center;gap:7px;margin:12px 0 10px;padding:9px 11px;border:1px solid;border-radius:10px;font-size:11px;line-height:1.4;}
+.cell-limit-status.is-within{border-color:rgba(37,129,95,0.22);background:var(--green-soft);color:var(--green);}
+.cell-limit-status.is-over{border-color:rgba(190,58,67,0.24);background:#fff1f2;color:#a92f3a;}
+.comparison-export-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.94);}
+.comparison-export-summary>div:first-child{display:grid;gap:4px;}.comparison-export-summary>div:first-child strong{color:var(--ink-900);font-size:13px;}.comparison-export-summary>div:first-child span{color:var(--ink-500);font-size:10px;line-height:1.5;}.comparison-export-summary .cell-limit-status{flex:none;margin:0;}
 .result-tip{margin:12px 0 0;color:var(--ink-500);font-size:9px;line-height:1.55;}
 .result-continuation{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:15px;padding:16px 18px;border:1px solid var(--line);border-radius:var(--radius-md);background:rgba(255,255,255,.94);box-shadow:var(--shadow-sm);}
 .result-continuation>div{display:grid;gap:3px;}
@@ -543,6 +548,8 @@ to{opacity:1;transform:translateY(0);}
 .missing-guide{grid-template-columns:auto minmax(0,1fr);}
 .missing-guide .button{grid-column:1/-1;width:100%;}
 .result-hero{align-items:flex-start;}
+.comparison-export-summary{align-items:stretch;flex-direction:column;}
+.comparison-export-summary .cell-limit-status{width:100%;}
 .result-actions,.result-actions .button{width:100%;}
 }
 @media (max-width:540px){.brand-lockup small,.review-brand small,.topbar-actions .button,.autoplay-toggle-copy{display:none;}

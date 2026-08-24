@@ -57,6 +57,8 @@ function annotation() {
 
 const reference = annotation();
 const candidate = annotation();
+const finalSnapshot = context.SB_SHARED_DATA.finalSnapshotResult({ ...candidate, result_revision: 2, revision_history: [{ revision: 2, changes: [] }] });
+assert.strictEqual(api.parseJson(JSON.stringify(finalSnapshot), "标注结果").error, undefined, "comparison must accept the standard history-free final snapshot without translation");
 candidate.mos[0].scores.melody = 3;
 candidate.mos[0].low_score_issues.melody = ["主旋律难以分辨"];
 candidate.mos[1].scores.audio_quality = 1;
@@ -82,6 +84,16 @@ api.state.selectedBlindId = ids[0];
 api.state.expanded.add(`${ids[0]}:melody`);
 api.state.screen = "compare";
 api.render();
+const correctedResult = api.buildCorrectedResult();
+const refinedResult = api.buildRefinedResult();
+assert.strictEqual(refinedResult.revision_history, undefined, "administrator refined result must omit revision history");
+assert.strictEqual(refinedResult.revision_remark, undefined, "administrator refined result must omit the revision remark");
+assert.strictEqual(refinedResult.result_revision, correctedResult.result_revision, "administrator refined result must retain the corrected revision number");
+assert.deepStrictEqual(refinedResult.admin_quality_review, correctedResult.admin_quality_review, "administrator refined result must retain review metadata");
+assert(/^\d{8}-\d{6}$/.test(api.exportTimestamp()), "administrator result filenames need a filesystem-safe timestamp");
+assert(root.innerHTML.includes("精简结果 JSON（无修改历史）"), "comparison page must clearly distinguish the history-free result");
+assert(root.innerHTML.includes("下载完整审计 JSON"), "comparison page must preserve a full revision-history download");
+assert(root.innerHTML.includes("5K"), "comparison page must display the spreadsheet character-limit status");
 assert(root.innerHTML.includes("下载对比长图 PNG"), "comparison page must provide a PNG long-image export");
 assert(root.innerHTML.includes("Case 音频试听"), "comparison page must provide a dedicated case audio panel");
 assert(root.innerHTML.includes('class="comparison-audio-player"'), "valid candidate URLs must render playable audio controls");
