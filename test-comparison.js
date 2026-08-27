@@ -49,7 +49,12 @@ function annotation() {
     schema_version: context.SB_SHARED_DATA.REVIEW_SCHEMA,
     work_order_fingerprint: "same-fingerprint",
     batch_id: "BATCH-TEST", task_bundle_id: "TASK-TEST", case_id: "CASE-TEST", model_count: 2,
-    work_order: { candidates: ids.map((blind_id, index) => ({ slot: index + 1, blind_id, url: index ? `[https://example.com/${index}.mp3](https://example.com/${index}.mp3)` : `https://example.com/${index}.mp3` })) },
+    work_order: {
+      schema_version: context.SB_SHARED_DATA.WORK_ORDER_SCHEMA,
+      batch_id: "BATCH-TEST", task_bundle_id: "TASK-TEST", case_id: "CASE-TEST", model_count: 2,
+      tag: "test prompt", lyrics: "test lyrics", elo_order_key: "K-TEST-ORDER",
+      candidates: ids.map((blind_id, index) => ({ slot: index + 1, blind_id, url: index ? `[https://example.com/${index}.mp3](https://example.com/${index}.mp3)` : `https://example.com/${index}.mp3` }))
+    },
     mos: ids.map((blind_id, index) => ({ subtask_id: `MOS-0${index + 1}`, blind_id, scores: Object.fromEntries(dimensions.map((dimension) => [dimension.key, 4])), low_score_issues: {}, notes: {}, instruction_deductions: [], instruction_note: "" })),
     elo_matches: [{ subtask_id: "ELO-01", left_blind_id: ids[0], right_blind_id: ids[1], dimension_results: Object.fromEntries(eloDimensions.map((dimension) => [dimension.key, "left"])), note: "" }]
   };
@@ -123,12 +128,19 @@ const imageDownload = api.downloadComparisonImage();
 assert(imageDownload && typeof imageDownload.then === "function", "PNG export must return an asynchronous completion signal");
 assert.strictEqual(downloadedFilename, "comparison-CASE-TEST.png", "PNG export must use a clear Case-based filename");
 
-const wrongCase = annotation(); wrongCase.work_order_fingerprint = "wrong";
-assert(api.validatePair(reference, wrongCase).some((error) => error.includes("work_order_fingerprint")), "different work orders must be rejected");
+const legacyFingerprint = annotation(); legacyFingerprint.work_order_fingerprint = "wrong";
+assert.deepStrictEqual(Array.from(api.validatePair(reference, legacyFingerprint)), [], "legacy context-sensitive fingerprints must not block otherwise identical tasks");
+const missingContext = annotation(); delete missingContext.work_order.tag; delete missingContext.work_order.lyrics;
+assert.deepStrictEqual(Array.from(api.validatePair(reference, missingContext)), [], "optional tag and lyrics may be absent on one side");
+assert(api.optionalContextWarnings(reference, missingContext).some((warning) => warning.includes("tag 仅一侧提供")), "missing optional context must be surfaced as a warning");
+const hydratedContext = api.mergeOptionalContext(missingContext, reference);
+assert.strictEqual(hydratedContext.work_order.tag, reference.work_order.tag, "missing tag must be hydrated from the other compatible result");
+assert.strictEqual(hydratedContext.work_order.lyrics, reference.work_order.lyrics, "missing lyrics must be hydrated from the other compatible result");
 const wrongAudio = annotation(); wrongAudio.work_order.candidates[0].url = "https://example.com/different.mp3";
 assert(api.validatePair(reference, wrongAudio).some((error) => error.includes("R-TEST-A 的音频 URL 不一致")), "candidate audio URLs must match exactly across both answers");
 const wrongCaseInfo = annotation(); wrongCaseInfo.work_order.tag = "different case prompt";
-assert(api.validatePair(reference, wrongCaseInfo).some((error) => error.includes("Case 的 tag 信息不一致")), "case source information must match across both answers");
+assert.deepStrictEqual(Array.from(api.validatePair(reference, wrongCaseInfo)), [], "different optional context must not block comparison");
+assert(api.optionalContextWarnings(reference, wrongCaseInfo).some((warning) => warning.includes("tag 内容不同")), "different non-empty context must require an explicit warning");
 assert(root.innerHTML.includes("管理员专用"), "administrator page must identify its restricted purpose");
 assert(root.innerHTML.includes("继续对比下一份"), "comparison result must provide a direct batch-comparison continuation action");
 const preservedReference = api.state.referenceText;

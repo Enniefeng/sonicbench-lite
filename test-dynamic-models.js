@@ -102,6 +102,10 @@ function adminLine(modelCount) {
   assert.strictEqual(state.generatedRows.length, 1);
   assert.strictEqual(state.mapping.model_count, modelCount);
   assert.strictEqual(state.mapping.entries.length, modelCount);
+  assert.strictEqual(state.mapping.case_contexts.length, 1, "mapping must retain optional Case context for downstream hydration");
+  assert.strictEqual(state.mapping.case_contexts[0].tag, "dynamic test");
+  assert.strictEqual(state.mapping.case_contexts[0].lyrics, "line 1\nline 2");
+  assert.strictEqual(state.mapping.case_contexts[0].candidates.length, modelCount);
   assert(state.generatedRows[0].candidates.every((candidate) => /^https?:\/\//.test(candidate.url)), "admin must unwrap Markdown URLs");
   assert(state.mapping.entries.every((entry) => !entry.source_url.startsWith("[")), "mapping must store canonical URLs");
   const csvRows = context.SB_UTILS.parseDelimitedDetailed(state.workOrderCsv).rows;
@@ -175,6 +179,25 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(annotation.elo_matches.length, parsed.task.eloMatchCount);
   assert.strictEqual(annotation.total_subtask_count, parsed.task.totalSubtaskCount);
   assert.deepStrictEqual(Array.from(api.validateAnnotation(annotation, parsed.task)), []);
+
+  const contextless = JSON.parse(JSON.stringify(annotation));
+  delete contextless.work_order.tag;
+  delete contextless.work_order.lyrics;
+  contextless.work_order_fingerprint = "legacy-context-sensitive-fingerprint";
+  const parsedContextless = api.parseResultJson(JSON.stringify(contextless));
+  assert.deepStrictEqual(Array.from(parsedContextless.errors), [], "standalone results missing optional tag and lyrics must remain loadable");
+  assert.strictEqual(parsedContextless.annotation.work_order.tag, "", "compatible exports must materialize an empty tag key");
+  assert.strictEqual(parsedContextless.annotation.work_order.lyrics, "", "compatible exports must materialize an empty lyrics key");
+  assert(parsedContextless.annotation.task_identity_fingerprint, "compatible exports must include the stable task identity fingerprint");
+
+  const contextlessCells = lineCells.slice();
+  contextlessCells[contextlessCells.length - 1] = JSON.stringify(contextless);
+  const hydratedRow = api.parseWorkOrder(context.SB_UTILS.serializeTSVRow(contextlessCells), modelCount);
+  assert.deepStrictEqual(Array.from(hydratedRow.errors), [], "a complete work-order row must hydrate a contextless historical result");
+  api.loadTask(hydratedRow.task, hydratedRow.annotation, { skipDraft: true, workMode: "quality" });
+  const hydratedExport = api.createAnnotation();
+  assert.strictEqual(hydratedExport.work_order.tag, parsed.task.tag, "row context must restore tag on the next export");
+  assert.strictEqual(hydratedExport.work_order.lyrics, parsed.task.lyrics, "row context must restore lyrics on the next export");
 
   const finalSnapshot = context.SB_SHARED_DATA.finalSnapshotResult(annotation);
   const expectedSnapshot = JSON.parse(JSON.stringify(annotation));

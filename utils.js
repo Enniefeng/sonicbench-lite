@@ -222,6 +222,26 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
 
+  function taskIdentityFingerprint(value) {
+    const source = value || {};
+    const context = source.work_order || source;
+    const candidates = Array.isArray(context.candidates) ? context.candidates : [];
+    const payload = {
+      schema_version: String(context.schema_version || source.schema || "sonicbench-work-order/flexible-model/1.0"),
+      batch_id: String(context.batch_id || source.batch_id || source.batchId || ""),
+      task_bundle_id: String(context.task_bundle_id || source.task_bundle_id || source.taskBundleId || ""),
+      case_id: String(context.case_id || source.case_id || source.caseId || ""),
+      model_count: Number(context.model_count || source.model_count || source.modelCount || candidates.length || 0),
+      candidates: candidates.map((candidate, index) => ({
+        slot: Number(candidate.slot || candidate.candidate_slot || index + 1),
+        blind_id: String(candidate.blind_id || candidate.id || ""),
+        url: normalizeHttpUrl(candidate.url || "")
+      })),
+      elo_order_key: String(context.elo_order_key || source.elo_order_key || source.eloOrderKey || "")
+    };
+    return hashString(JSON.stringify(payload));
+  }
+
   function seededRandom(seedText) {
     let state = parseInt(hashString(seedText), 16) >>> 0;
     return function next() {
@@ -347,6 +367,7 @@
       uniqueBlindId,
       makeBatchId,
       hashString,
+      taskIdentityFingerprint,
       createEloOrderFromKey,
       safeJsonParse,
       nowISO,

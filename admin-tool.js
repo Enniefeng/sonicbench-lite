@@ -401,6 +401,19 @@
       model_count: modelCount,
       source_model_columns: inspection.sourceHeaders,
       work_order_schema: WORK_ORDER_SCHEMA,
+      case_contexts: generatedRows.map((row) => ({
+        batch_id: batchId,
+        task_bundle_id: row.taskBundleId,
+        case_id: row.caseId,
+        tag: row.tag,
+        lyrics: row.lyrics,
+        elo_order_key: row.eloOrderKey,
+        candidates: row.candidates.map((candidate) => ({
+          slot: candidate.candidateSlot,
+          blind_id: candidate.blindId,
+          url: candidate.url
+        }))
+      })),
       randomization: {
         scope: "per_case",
         candidate_slots: modelCount,

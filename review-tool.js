@@ -291,6 +291,15 @@
     return U.hashString(JSON.stringify(cells.slice(0, resultIndex)));
   }
 
+  function taskIdentityFingerprint(task) {
+    return U.taskIdentityFingerprint ? U.taskIdentityFingerprint(task) : task.fingerprint;
+  }
+
+  function contextIncomplete(annotation) {
+    const context = annotation && annotation.work_order;
+    return !context || !String(context.tag || "").trim() || !String(context.lyrics || "").trim();
+  }
+
   function normalizeFlatCells(cells, resultIndex) {
     return cells.map((cell, index) => {
       if (index === resultIndex) return String(cell || "").trim();
@@ -363,6 +372,7 @@
       headers: contract.headers,
       fingerprint: workOrderFingerprint(cells, contract.resultIndex)
     };
+    task.identityFingerprint = taskIdentityFingerprint(task);
     try {
       task.eloMatches = eloPlan(candidates, task.eloOrderKey);
     } catch (error) {
@@ -409,7 +419,13 @@
     if (annotation.batch_id !== task.batchId) errors.push("结果中的 batch_id 与当前工单不一致");
     if (annotation.task_bundle_id !== task.taskBundleId) errors.push("结果中的 task_bundle_id 与当前工单不一致");
     if (annotation.case_id !== task.caseId) errors.push("结果中的 case_id 与当前工单不一致");
-    if (annotation.work_order_fingerprint !== task.fingerprint) errors.push("结果指纹与当前工单不一致，可能粘贴到了错误行");
+    const annotationIdentity = annotation.task_identity_fingerprint
+      || (annotation.work_order && U.taskIdentityFingerprint ? U.taskIdentityFingerprint(annotation) : "");
+    if (annotationIdentity && annotationIdentity !== task.identityFingerprint) {
+      errors.push("结果的任务身份与当前工单不一致，可能粘贴到了错误 Case");
+    } else if (annotation.work_order_fingerprint !== task.fingerprint && !contextIncomplete(annotation)) {
+      errors.push("结果指纹与当前工单不一致，可能粘贴到了错误行");
+    }
     if (annotation.completed_subtask_count !== task.totalSubtaskCount || annotation.total_subtask_count !== task.totalSubtaskCount) {
       errors.push(`结果任务计数必须为 ${task.totalSubtaskCount}`);
     }
@@ -604,6 +620,23 @@
     };
   }
 
+  function normalizeAnnotationContext(annotation, task) {
+    const output = clone(annotation);
+    const source = output.work_order && typeof output.work_order === "object" ? output.work_order : {};
+    const canonical = workOrderContext(task);
+    output.work_order = {
+      ...source,
+      ...canonical,
+      tag: String(source.tag || canonical.tag || ""),
+      lyrics: String(source.lyrics || canonical.lyrics || ""),
+      candidates: canonical.candidates
+    };
+    output.model_count = task.modelCount;
+    output.task_identity_fingerprint = task.identityFingerprint;
+    if (!output.work_order_fingerprint) output.work_order_fingerprint = task.fingerprint;
+    return output;
+  }
+
   function parseResultJson(text) {
     if (!String(text || "").trim()) return { errors: ["请粘贴完整的结果 JSON"] };
     const parsed = U.safeJsonParse(String(text).trim());
@@ -632,8 +665,9 @@
     const contract = contractFromColumnCount(cells.length);
     const normalized = normalizeWorkOrderUrls(normalizeFlatCells(cells, contract.resultIndex), contract);
     const task = buildTask(normalized);
-    const errors = validateTask(task).concat(validateAnnotation(annotation, task));
-    return { task, annotation, errors: [...new Set(errors)] };
+    const normalizedAnnotation = normalizeAnnotationContext(annotation, task);
+    const errors = validateTask(task).concat(validateAnnotation(normalizedAnnotation, task));
+    return { task, annotation: normalizedAnnotation, errors: [...new Set(errors)] };
   }
 
   function draftKey(task) {
@@ -1016,7 +1050,7 @@
     const changeCount = changes.length;
     if (state.loadedHistory && changeCount === 0 && state.task.cells[state.task.resultIndex]) {
       const existing = U.safeJsonParse(state.task.cells[state.task.resultIndex]);
-      if (!existing.error && existing.value && existing.value.work_order) return existing.value;
+      if (!existing.error && existing.value && existing.value.work_order) return normalizeAnnotationContext(existing.value, state.task);
     }
     const previousAnnotation = state.loadedHistory ? state.sourceAnnotation : null;
     const previousRevision = previousAnnotation ? Number(previousAnnotation.result_revision) || 1 : 0;
@@ -1026,6 +1060,7 @@
     return {
       schema_version: RESULT_SCHEMA,
       work_order_fingerprint: state.task.fingerprint,
+      task_identity_fingerprint: state.task.identityFingerprint,
       batch_id: state.task.batchId,
       task_bundle_id: state.task.taskBundleId,
       case_id: state.task.caseId,
@@ -1111,6 +1146,7 @@
     return {
       schema_version: RESULT_SCHEMA,
       work_order_fingerprint: task.fingerprint,
+      task_identity_fingerprint: task.identityFingerprint,
       batch_id: task.batchId,
       task_bundle_id: task.taskBundleId,
       case_id: task.caseId,
