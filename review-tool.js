@@ -30,6 +30,8 @@
   const PLAYBACK_PREFERENCE_KEY = "sonicbench-lite-playback-preferences/1.0";
   const MODEL_COUNT_PREFERENCE_KEY = "sonicbench-lite-model-count-preference/1.0";
   const ACCEPTANCE_MAPPING_KEY = "sonicbench_acceptance_mapping_v1";
+  const ACCEPTANCE_MAPPING_DB = "sonicbench-acceptance-storage";
+  const ACCEPTANCE_MAPPING_STORE = "settings";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
   let lastRenderedSubtaskKey = "";
@@ -75,6 +77,63 @@
     } catch (error) {
       return "";
     }
+  }
+
+  function openAcceptanceMappingDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error("IndexedDB unavailable"));
+      const request = window.indexedDB.open(ACCEPTANCE_MAPPING_DB, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(ACCEPTANCE_MAPPING_STORE)) request.result.createObjectStore(ACCEPTANCE_MAPPING_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("无法打开 Mapping 本地缓存"));
+    });
+  }
+
+  async function readAcceptanceMappingAsync() {
+    const legacy = readAcceptanceMapping();
+    if (legacy) return legacy;
+    try {
+      const database = await openAcceptanceMappingDb();
+      const value = await new Promise((resolve, reject) => {
+        const request = database.transaction(ACCEPTANCE_MAPPING_STORE, "readonly").objectStore(ACCEPTANCE_MAPPING_STORE).get(ACCEPTANCE_MAPPING_KEY);
+        request.onsuccess = () => resolve(request.result || "");
+        request.onerror = () => reject(request.error || new Error("无法读取 Mapping 本地缓存"));
+      });
+      database.close();
+      return String(value || "");
+    } catch (error) {
+      return "";
+    }
+  }
+
+  async function persistAcceptanceMapping(value) {
+    const text = String(value || "");
+    let persisted = false;
+    try {
+      if (text.length < 2000000) {
+        window.localStorage.setItem(ACCEPTANCE_MAPPING_KEY, text);
+        persisted = true;
+      } else {
+        window.localStorage.removeItem(ACCEPTANCE_MAPPING_KEY);
+      }
+    } catch (error) {
+      try { window.localStorage.removeItem(ACCEPTANCE_MAPPING_KEY); } catch (_removeError) { /* no-op */ }
+    }
+    try {
+      const database = await openAcceptanceMappingDb();
+      await new Promise((resolve, reject) => {
+        const request = database.transaction(ACCEPTANCE_MAPPING_STORE, "readwrite").objectStore(ACCEPTANCE_MAPPING_STORE).put(text, ACCEPTANCE_MAPPING_KEY);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error || new Error("无法缓存 Mapping"));
+      });
+      database.close();
+      persisted = true;
+    } catch (error) {
+      /* Mapping remains available in memory for this review even if persistence fails. */
+    }
+    return persisted;
   }
 
   const state = {
@@ -2110,7 +2169,9 @@
       if (acceptanceOnly) {
         try {
           state.mapping = parseAcceptanceMapping(state.mappingText);
-          window.localStorage.setItem(ACCEPTANCE_MAPPING_KEY, state.mappingText);
+          persistAcceptanceMapping(state.mappingText).then((persisted) => {
+            if (!persisted) toast("Mapping 已载入；浏览器未能长期缓存，下次进入时需重新选择文件", "error");
+          });
         } catch (error) {
           state.errors = [error.message || String(error)];
           return render();
@@ -2243,5 +2304,12 @@
     }
   });
 
+  if (acceptanceOnly && !state.mappingText) {
+    readAcceptanceMappingAsync().then((value) => {
+      if (!value || state.mappingText) return;
+      state.mappingText = value;
+      render();
+    });
+  }
   render();
 })();

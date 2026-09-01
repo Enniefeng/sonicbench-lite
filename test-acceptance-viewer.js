@@ -36,4 +36,7 @@ assert.doesNotMatch(acceptanceHtml, /acceptance-viewer\.js/);
 assert.match(reviewSource, /管理员Mapping验收/);
 assert.match(reviewSource, /只读验收 · 不会修改或导出结果/);
 assert.match(reviewSource, /if \(acceptanceOnly\) return;/);
+assert.match(reviewSource, /persistAcceptanceMapping\(state\.mappingText\)/);
+assert.match(reviewSource, /window\.indexedDB\.open\(ACCEPTANCE_MAPPING_DB, 1\)/);
+assert.match(reviewSource, /Mapping remains available in memory for this review even if persistence fails/);
 console.log("Acceptance viewer format and privacy regression passed.");
