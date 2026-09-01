@@ -1,0 +1,34 @@
+.hero h1 {
+  margin-top: 0;
+}
+
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.result-toolbar strong,
+.result-toolbar small {
+  display: block;
+}
+
+.result-toolbar strong {
+  font-size: 12px;
+}
+
+.result-toolbar small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+@media (max-width: 760px) {
+  .result-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
