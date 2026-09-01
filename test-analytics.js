@@ -7,7 +7,7 @@ const htmlFiles = fs.readdirSync(".").filter((file) => file.endsWith(".html"));
 
 assert.deepEqual(
   htmlFiles.sort(),
-  ["admin-console.html", "admin.html", "aggregation.html", "index.html", "readme.html"],
+  ["acceptance-viewer.html", "admin-console.html", "admin.html", "aggregation.html", "index.html", "readme.html"],
   "Update the analytics coverage test when adding or removing an HTML entry point",
 );
 

@@ -1,0 +1,22 @@
+/* eslint-disable no-console */
+const assert = require("assert");
+global.window = global;
+require("./shared-data.js");
+const Core = require("./acceptance-viewer-core.js");
+const dimensions = global.SB_SHARED_DATA.MOS_DIMENSIONS;
+const ids = ["R-A", "R-B"];
+const mapping = { mapping_version: "sonicbench-mapping/flexible-model/1.0", batch_id: "B", source_model_columns: ["model_1_url", "model_2_url"], entries: ids.map((blind_id, index) => ({ batch_id: "B", case_id: "C", blind_id, source_model_key: `model_${index + 1}`, source_column: `model_${index + 1}_url` })) };
+const scores = Object.fromEntries(dimensions.map((item) => [item.key, 4]));
+const result = { batch_id: "B", case_id: "C", started_at: "2026-01-01", result_revision: 9, mos: ids.map((blind_id, index) => ({ subtask_id: `MOS-0${index + 1}`, blind_id, scores, low_score_issues: {}, notes: { overall: `备注${index + 1}` } })), elo_matches: [{ subtask_id: "ELO-01", left_blind_id: ids[0], right_blind_id: ids[1], dimension_results: { musicality: "left", acoustics: "draw", vocals: "right", overall: "left" }, note: "对战备注" }] };
+const view = Core.buildView(mapping, JSON.stringify({ annotation_result_json: JSON.stringify(result) }));
+assert.deepStrictEqual(view.mos.map((item) => item.model.label), ["Model 1", "Model 2"]);
+assert.strictEqual(view.mos[0].scores.overall, 4);
+assert.strictEqual(view.mos[0].notes.overall, "备注1");
+assert.strictEqual(view.elo[0].left.key, "model_1");
+assert.strictEqual(view.elo[0].dimension_results.acoustics, "draw");
+assert.strictEqual("started_at" in view, false);
+assert.strictEqual("result_revision" in view, false);
+const compact = JSON.parse(JSON.stringify(result)); delete compact.started_at; delete compact.result_revision;
+assert.strictEqual(Core.buildView(JSON.stringify(mapping), JSON.stringify([compact])).mos.length, 2);
+assert.throws(() => Core.buildView(mapping, JSON.stringify([result, result])), /一次只载入一个/);
+console.log("Acceptance viewer format and privacy regression passed.");
