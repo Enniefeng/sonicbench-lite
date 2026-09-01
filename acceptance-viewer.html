@@ -1,4 +1,21 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="robots" content="noindex,nofollow"><title>SonicBench · 管理员验收查看</title><link rel="stylesheet" href="acceptance-viewer.css"><link rel="stylesheet" href="acceptance-viewer-overrides.css"></head>
-<body><header class="topbar"><a class="brand" href="acceptance-viewer.html"><span class="brand-mark">SB</span><span><strong>SonicBench</strong><small>管理员验收查看端</small></span></a><a class="back-link" href="admin-console.html">返回结果对比</a></header><main class="shell"><section class="hero"><h1>管理员Mapping验收</h1><p>导入管理员Mapping，并逐条粘贴评测结果可进行评测验收。</p></section>
-<section id="input-panel" class="input-panel"><div class="section-title"><span>01</span><div><h2>导入验收数据</h2><p id="mapping-status">Mapping 仅保存在当前浏览器</p></div><button id="clear-view" class="button ghost" type="button">清空当前结果</button></div><div class="input-grid"><article><h3>管理员 Mapping</h3><textarea id="mapping-input" spellcheck="false" placeholder="粘贴 sonicbench-mapping JSON…"></textarea><label class="file-button">选择 Mapping 文件<input id="mapping-file" type="file" accept=".json,application/json"></label></article><article><h3>单条结果 JSON</h3><textarea id="result-input" spellcheck="false" placeholder="支持完整结果、精简结果、单元素数组、双层 JSON 字符串或包装对象…"></textarea><label class="file-button">选择结果文件<input id="result-file" type="file" accept=".json,.txt,application/json,text/plain"></label></article></div><div id="input-error" class="message error" hidden></div><div class="primary-row"><span>输入只在浏览器本地解析，不会上传。</span><button id="load-result" class="button primary" type="button">解析并查看 <b>→</b></button></div></section>
-<section id="result-view" class="result-view" hidden><div class="result-toolbar"><div><strong id="result-summary">—</strong><small>只读查看，不支持修改结果</small></div><button id="next-result" class="button ghost" type="button">导入下一条</button></div><section><div class="block-title"><h2>MOS 评分与备注</h2><span id="mos-count"></span></div><div id="mos-list" class="mos-list"></div></section><section><div class="block-title"><h2>ELO 对战结果</h2><span id="elo-count"></span></div><div class="table-wrap"><table><thead><tr><th>对战</th><th>左侧模型</th><th>右侧模型</th><th>音乐性</th><th>音质与声学</th><th>Vocals</th><th>总体</th><th>备注</th></tr></thead><tbody id="elo-list"></tbody></table></div></section></section></main><footer>管理员验收查看端 · 页面仅展示评测结论</footer><script src="shared-data.js"></script><script src="acceptance-viewer-core.js"></script><script src="acceptance-viewer.js"></script><!-- Cloudflare Web Analytics --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"eea4dfe6f095498b8e3ec03c14941504"}'></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="robots" content="noindex,nofollow">
+  <title>SonicBench · 管理员 Mapping 验收</title>
+  <link rel="stylesheet" href="styles.css?v=20260901-acceptance-review">
+  <link rel="stylesheet" href="acceptance-viewer-overrides.css?v=20260901-acceptance-review">
+</head>
+<body class="review-body acceptance-viewer-body">
+  <div id="review-app" data-acceptance-viewer="true"></div>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="shared-data.js?v=20260824-50k-limit"></script>
+  <script src="utils.js?v=20260827-context-compat"></script>
+  <script src="ui.js"></script>
+  <script src="review-tool.js?v=20260901-acceptance-review"></script>
+  <!-- Cloudflare Web Analytics --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"eea4dfe6f095498b8e3ec03c14941504"}'></script><!-- End Cloudflare Web Analytics -->
+</body>
+</html>

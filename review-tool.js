@@ -6,6 +6,7 @@
   const D = window.SB_SHARED_DATA;
   const UI = window.SB_UI;
   if (!root || !U || !D || !UI) return;
+  const acceptanceOnly = Boolean(root.dataset && root.dataset.acceptanceViewer === "true");
 
   const { escapeHtml: h, icon, toast } = UI;
   const MIN_MODEL_COUNT = D.MIN_MODEL_COUNT || 2;
@@ -28,6 +29,7 @@
   const LAST_DRAFT_KEY = "sonicbench-lite-review-last-draft/flexible-model/1.0";
   const PLAYBACK_PREFERENCE_KEY = "sonicbench-lite-playback-preferences/1.0";
   const MODEL_COUNT_PREFERENCE_KEY = "sonicbench-lite-model-count-preference/1.0";
+  const ACCEPTANCE_MAPPING_KEY = "sonicbench_acceptance_mapping_v1";
   const playbackMemory = new Map();
   let draftSaveTimer = null;
   let lastRenderedSubtaskKey = "";
@@ -67,10 +69,18 @@
     }
   }
 
+  function readAcceptanceMapping() {
+    try {
+      return window.localStorage.getItem(ACCEPTANCE_MAPPING_KEY) || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
   const state = {
     screen: "import",
-    importMode: "annotate",
-    workMode: "annotate",
+    importMode: acceptanceOnly ? "quality" : "annotate",
+    workMode: acceptanceOnly ? "quality" : "annotate",
     pasteText: "",
     errors: [],
     task: null,
@@ -88,7 +98,9 @@
     railScrollTop: 0,
     validationOpen: false,
     autoPlayFirstAudio: readAutoPlayPreference(),
-    selectedModelCount: 6
+    selectedModelCount: 6,
+    mappingText: acceptanceOnly ? readAcceptanceMapping() : "",
+    mapping: null
   };
 
   function clone(value) {
@@ -637,6 +649,46 @@
     return output;
   }
 
+  function parseAcceptanceMapping(value) {
+    const parsed = U.safeJsonParse(String(value || "").trim());
+    if (parsed.error || !parsed.value || typeof parsed.value !== "object" || !Array.isArray(parsed.value.entries) || !parsed.value.entries.length) {
+      throw new Error("管理员 Mapping 不是有效 JSON，或缺少 entries");
+    }
+    return clone(parsed.value);
+  }
+
+  function acceptanceValidationErrors(annotation, task) {
+    return validateAnnotation(annotation, task).filter((message) => !(
+      /低分时至少选择一个问题|选择“其他”后必须补充备注|低分时必须备注|总评整体分必须备注|指令遵循扣分时至少选择一个扣分问题|指令遵循扣分后必须备注原因/.test(message)
+      || /^revision_history/.test(message)
+    ));
+  }
+
+  function mappingEntryForCandidate(candidateId) {
+    if (!acceptanceOnly || !state.mapping || !state.task) return null;
+    const batchId = String(state.task.batchId || "");
+    const caseId = String(state.task.caseId || "");
+    const exact = state.mapping.entries.filter((entry) => String(entry.blind_id || "") === candidateId
+      && (!batchId || String(entry.batch_id || "") === batchId)
+      && (!caseId || String(entry.case_id || "") === caseId));
+    const candidates = exact.length ? exact : state.mapping.entries.filter((entry) => String(entry.blind_id || "") === candidateId);
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  function modelSourceLabel(candidateId) {
+    const entry = mappingEntryForCandidate(candidateId);
+    if (!entry) return "模型来源未匹配";
+    const key = String(entry.source_model_key || entry.source_column || "未知模型");
+    const columns = Array.isArray(state.mapping.source_model_columns) ? state.mapping.source_model_columns : [];
+    const column = String(entry.source_column || "");
+    let index = columns.findIndex((item) => String(item) === column || String(item).replace(/_url$/i, "") === key);
+    if (index < 0) {
+      const match = `${key} ${column}`.match(/model[_\s-]?(\d+)/i);
+      index = match ? Number(match[1]) - 1 : -1;
+    }
+    return index >= 0 ? `Model ${index + 1}` : key;
+  }
+
   function parseResultJson(text) {
     if (!String(text || "").trim()) return { errors: ["请粘贴完整的结果 JSON"] };
     const parsed = U.safeJsonParse(String(text).trim());
@@ -666,7 +718,10 @@
     const normalized = normalizeWorkOrderUrls(normalizeFlatCells(cells, contract.resultIndex), contract);
     const task = buildTask(normalized);
     const normalizedAnnotation = normalizeAnnotationContext(annotation, task);
-    const errors = validateTask(task).concat(validateAnnotation(normalizedAnnotation, task));
+    const annotationErrors = acceptanceOnly
+      ? acceptanceValidationErrors(normalizedAnnotation, task)
+      : validateAnnotation(normalizedAnnotation, task);
+    const errors = validateTask(task).concat(annotationErrors);
     return { task, annotation: normalizedAnnotation, errors: [...new Set(errors)] };
   }
 
@@ -693,6 +748,7 @@
   }
 
   function saveDraft() {
+    if (acceptanceOnly) return;
     if (!state.task) return;
     const currentProgress = progress();
     const payload = {
@@ -802,6 +858,7 @@
     if (!answer || !answer.scores) return false;
     if (!DIMENSIONS.every((dimension) => Number.isInteger(answer.scores[dimension.key])
       && answer.scores[dimension.key] >= 1 && answer.scores[dimension.key] <= 5)) return false;
+    if (acceptanceOnly) return true;
     if (SUBDIMENSIONS.some((dimension) => {
       if (answer.scores[dimension.key] > 3) return false;
       const selected = answer.low_score_issues[dimension.key] || [];
@@ -1302,6 +1359,13 @@
   }
 
   function renderTopbar(extra) {
+    if (acceptanceOnly) return `<header class="review-topbar">
+      <a class="review-brand" href="./acceptance-viewer.html">
+        <span class="brand-symbol">${icon("shield", 19)}</span>
+        <span><strong>SonicBench</strong><small>管理员 Mapping 验收</small></span>
+      </a>
+      <div class="topbar-actions">${extra || ""}<span class="privacy-chip">${icon("eye", 15)} 只读验收</span></div>
+    </header>`;
     return `<header class="review-topbar">
       <div class="review-brand">
         <span class="brand-symbol">${icon("headphones", 19)}</span>
@@ -1391,6 +1455,42 @@
   }
 
   function renderImport() {
+    if (acceptanceOnly) {
+      const hasMapping = Boolean(state.mappingText.trim());
+      root.innerHTML = `<div class="review-shell import-shell acceptance-shell">
+        ${renderTopbar("")}
+        <main class="review-import">
+          <section class="import-hero acceptance-hero">
+            <span class="eyebrow">ADMIN ACCEPTANCE REVIEW</span>
+            <h1>管理员Mapping验收</h1>
+            <p>导入管理员Mapping，并逐条粘贴评测结果可进行评测验收。</p>
+            <div class="import-task-summary" aria-label="只读查看 MOS 与 ELO 子任务">
+              <span class="task-summary-item"><b>M</b><span><strong>MOS</strong><small>分数、问题与备注</small></span></span>
+              <i aria-hidden="true">+</i>
+              <span class="task-summary-item"><b>E</b><span><strong>ELO</strong><small>逐场胜／平／负</small></span></span>
+              <i aria-hidden="true">=</i>
+              <span class="task-summary-item task-summary-total"><b>ID</b><span><strong>模型来源</strong><small>Mapping 还原</small></span></span>
+            </div>
+          </section>
+          <section class="import-card acceptance-import-card">
+            <div class="acceptance-input-grid">
+              <article>
+                <div class="card-heading"><div><span class="step-number">01</span><h2>管理员 Mapping</h2></div><span class="column-badge">${hasMapping ? "已读取本机缓存" : "必需"}</span></div>
+                <textarea id="acceptance-mapping-input" class="paste-area" rows="9" spellcheck="false" placeholder="粘贴 sonicbench-mapping JSON…">${h(state.mappingText)}</textarea>
+                <label class="button ghost acceptance-file-button">${icon("file", 16)} 选择 Mapping 文件<input id="acceptance-mapping-file" type="file" accept=".json,application/json" hidden></label>
+              </article>
+              <article>
+                <div class="card-heading"><div><span class="step-number">02</span><h2>单条评测结果 JSON</h2></div><span class="column-badge">只读验收</span></div>
+                <textarea id="work-order-input" class="paste-area" rows="9" spellcheck="false" placeholder="粘贴一条包含 work_order、mos 与 elo_matches 的结果 JSON；时间戳、版本和备注可缺省。">${h(state.pasteText)}</textarea>
+              </article>
+            </div>
+            ${renderErrors()}
+            <div class="import-actions acceptance-import-actions"><span>所有内容仅在当前浏览器本地解析，不会上传。</span><button class="button primary" data-action="parse-input">解析并进入验收 ${icon("arrowRight", 16)}</button></div>
+          </section>
+        </main>
+      </div>`;
+      return;
+    }
     const draftHistory = listDraftHistory();
     const qualityMode = state.importMode === "quality";
     root.innerHTML = `<div class="review-shell import-shell">
@@ -1467,7 +1567,7 @@
       </button>`;
     };
     const mosItems = state.task.candidates.map((candidate, index) => renderItem(
-      index, `候选 ${String(candidate.slot).padStart(2, "0")}`, eloStage ? "身份已隐藏" : candidate.id, mosComplete(candidate.id), false
+      index, acceptanceOnly ? modelSourceLabel(candidate.id) : `候选 ${String(candidate.slot).padStart(2, "0")}`, acceptanceOnly ? candidate.id : (eloStage ? "身份已隐藏" : candidate.id), mosComplete(candidate.id), false
     )).join("");
     const eloItems = state.task.eloMatches.map((match, index) => renderItem(
       index + state.task.modelCount, `ELO 对战 ${String(index + 1).padStart(2, "0")}`, match.match_id,
@@ -1482,9 +1582,10 @@
   }
 
   function renderAudioCard(candidate, label, compact, hideIdentity = false) {
+    const source = acceptanceOnly ? modelSourceLabel(candidate.id) : "";
     const identity = hideIdentity
       ? `<div class="identity-veil">${icon("shield", 15)}<span><small>身份已隐藏</small><strong>仅以 A / B 完成本场判断</strong></span></div>`
-      : `<div><small>匿名音频 ID</small><strong class="mono">${h(candidate.id)}</strong></div>
+      : `<div><small>${acceptanceOnly ? "模型来源 · 匿名音频 ID" : "匿名音频 ID"}</small><strong>${acceptanceOnly ? `${h(source)} · ` : ""}<span class="mono">${h(candidate.id)}</span></strong></div>
         <button class="icon-button" data-action="copy-id" data-id="${h(candidate.id)}" title="复制匿名 ID">${icon("copy", 15)}</button>`;
     return `<article class="audio-card ${compact ? "is-compact" : ""} ${hideIdentity ? "is-identity-hidden" : ""}">
       <div class="audio-identity">
@@ -1497,16 +1598,21 @@
 
   function renderScoreScale(candidateId, dimension, answer) {
     return `<div class="score-scale" role="group" aria-label="${h(dimension.label)}评分">
-      ${[1, 2, 3, 4, 5].map((score) => `<button class="score-button ${answer.scores[dimension.key] === score ? "is-selected" : ""}" data-action="set-score" data-id="${h(candidateId)}" data-dimension="${h(dimension.key)}" data-score="${score}" aria-pressed="${answer.scores[dimension.key] === score}" title="${score} · ${SCORE_CAPTIONS[score]}"><b>${score}</b><span>${SCORE_CAPTIONS[score]}</span></button>`).join("")}
+      ${[1, 2, 3, 4, 5].map((score) => `<button class="score-button ${answer.scores[dimension.key] === score ? "is-selected" : ""}" data-action="set-score" data-id="${h(candidateId)}" data-dimension="${h(dimension.key)}" data-score="${score}" aria-pressed="${answer.scores[dimension.key] === score}" title="${score} · ${SCORE_CAPTIONS[score]}" ${acceptanceOnly ? "disabled" : ""}><b>${score}</b><span>${SCORE_CAPTIONS[score]}</span></button>`).join("")}
     </div>`;
   }
 
   function renderNote(candidateId, dimensionKey, value, label, required) {
-    return `<label class="dimension-note-field"><span>${h(label)}${required ? " · 必填" : ""}</span><textarea rows="2" data-role="mos-note" data-id="${h(candidateId)}" data-dimension="${h(dimensionKey)}" placeholder="请输入简要说明">${h(value || "")}</textarea></label>`;
+    if (acceptanceOnly && !String(value || "").trim()) return "";
+    return `<label class="dimension-note-field"><span>${h(label)}${required && !acceptanceOnly ? " · 必填" : ""}</span><textarea rows="2" data-role="mos-note" data-id="${h(candidateId)}" data-dimension="${h(dimensionKey)}" placeholder="请输入简要说明" ${acceptanceOnly ? "readonly" : ""}>${h(value || "")}</textarea></label>`;
   }
 
   function renderIssueChips(candidateId, dimension, answer) {
     const selected = answer.low_score_issues[dimension.key] || [];
+    if (acceptanceOnly) {
+      if (!selected.length) return "";
+      return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>已记录 ${selected.length} 项</small></div></div><div class="issue-chips">${selected.map((option) => `<span class="issue-chip is-selected">${icon("check", 11)}<span>${h(option)}</span></span>`).join("")}</div>${selected.includes("其他") ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "“其他”问题补充", false) : ""}</div>`;
+    }
     const options = LOW_SCORE_OPTIONS[dimension.key] || ["其他"];
     return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>必填 · 可多选</small></div><span>评分 ≤ 3</span></div><div class="issue-chips">${options.map((option) => `<button type="button" class="issue-chip ${selected.includes(option) ? "is-selected" : ""}" data-action="toggle-issue" data-id="${h(candidateId)}" data-dimension="${h(dimension.key)}" data-issue="${h(option)}" aria-pressed="${selected.includes(option)}">${selected.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div>${selected.includes("其他") ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "“其他”问题补充", true) : ""}</div>`;
   }
@@ -1520,6 +1626,11 @@
   function renderInstructionDeductions(candidateId, answer) {
     const instructionScore = answer.scores[INSTRUCTION_DIMENSION.key];
     if (!Number.isInteger(instructionScore) || instructionScore >= 5) return "";
+    if (acceptanceOnly) {
+      const selected = answer.instruction_deductions || [];
+      if (!selected.length && !String(answer.instruction_note || "").trim()) return "";
+      return `<div class="issue-panel instruction-issues"><div class="issue-heading"><div><strong>未遵循项</strong><small>${selected.length ? `已记录 ${selected.length} 项` : ""}</small></div></div>${selected.length ? `<div class="issue-chips">${selected.map((option) => `<span class="issue-chip is-selected">${icon("check", 11)}<span>${h(option)}</span></span>`).join("")}</div>` : ""}${renderNote(candidateId, "instruction_note", answer.instruction_note, "扣分原因备注", false)}</div>`;
+    }
     return `<div class="issue-panel instruction-issues"><div class="issue-heading"><div><strong>指令扣分项</strong><small>必填 · 可多选</small></div><span>评分低于 5</span></div><div class="issue-chips">${INSTRUCTION_DEDUCTION_OPTIONS.map((option) => `<button type="button" class="issue-chip ${answer.instruction_deductions.includes(option) ? "is-selected" : ""}" data-action="toggle-deduction" data-id="${h(candidateId)}" data-issue="${h(option)}" aria-pressed="${answer.instruction_deductions.includes(option)}">${answer.instruction_deductions.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div><label class="dimension-note-field"><span>扣分原因备注 · 必填</span><textarea rows="2" data-role="instruction-note" data-id="${h(candidateId)}" placeholder="说明具体未遵循之处">${h(answer.instruction_note || "")}</textarea></label></div>`;
   }
 
@@ -1541,8 +1652,8 @@
       <div class="stage-heading"><div><span class="stage-kicker">MOS · ${index + 1}/${state.task.modelCount}</span></div><span class="stage-state ${mosComplete(candidate.id) ? "is-complete" : ""}">${mosComplete(candidate.id) ? `${icon("check", 14)} 已完成` : `${mosMissingCount(candidate.id)} 项待补`}</span></div>
       ${renderStickyContext(renderAudioCard(candidate, `候选 ${String(candidate.slot).padStart(2, "0")}`, false, false))}
       <section class="rating-panel layered-rating"><div class="panel-heading"><strong>整体维度与子维度</strong><span>1 很差 · 3 合格 · 5 优秀</span></div>${groups}
-        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span><small>未遵循项勾选</small></div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
-        <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span><small>所有分数均须备注</small></div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
+        <section class="mos-group tone-purple"><div class="mos-group-title"><span>指令遵循</span>${acceptanceOnly ? "" : "<small>未遵循项勾选</small>"}</div>${renderDimension(candidate.id, INSTRUCTION_DIMENSION, answer, {})}${renderInstructionDeductions(candidate.id, answer)}</section>
+        <section class="mos-group tone-red"><div class="mos-group-title"><span>总体</span>${acceptanceOnly ? "" : "<small>所有分数均须备注</small>"}</div>${renderDimension(candidate.id, TOTAL_DIMENSION, answer, {})}${renderNote(candidate.id, TOTAL_DIMENSION.key, answer.notes[TOTAL_DIMENSION.key], "总评备注", true)}</section>
       </section>
     </section>`;
   }
@@ -1554,11 +1665,11 @@
     const answer = state.eloMatches[match.match_id];
     return `<section class="task-stage">
       <div class="stage-heading"><div><span class="stage-kicker">ELO MATCH · ${matchIndex + 1}/${state.task.eloMatchCount}</span></div><span class="stage-state ${eloMatchComplete(match.match_id) ? "is-complete" : ""}">${eloMatchComplete(match.match_id) ? `${icon("check", 14)} 已完成` : `${eloMissingCount(match.match_id)} 个维度待判断`}</span></div>
-      ${renderStickyContext(`<div class="comparison-grid">${renderAudioCard(left, "候选 A", true, true)}<div class="versus-mark">VS</div>${renderAudioCard(right, "候选 B", true, true)}</div>`)}
+      ${renderStickyContext(`<div class="comparison-grid">${renderAudioCard(left, acceptanceOnly ? `候选 A · ${modelSourceLabel(left.id)}` : "候选 A", true, !acceptanceOnly)}<div class="versus-mark">VS</div>${renderAudioCard(right, acceptanceOnly ? `候选 B · ${modelSourceLabel(right.id)}` : "候选 B", true, !acceptanceOnly)}</div>`)}
       <section class="rating-panel elo-rating">
-        <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>候选身份保持隐藏；每个维度均可选择平局。</small></div><span class="mono">${h(match.match_id)}</span></div>
-        <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row" data-dimension="${h(dimension.key)}"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}">A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}">平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}">B 胜</button></div></div>`; }).join("")}</div>
-        <label class="dimension-note-field elo-note"><span>本场共用备注 · 选填</span><textarea rows="2" data-role="elo-note" data-match="${h(match.match_id)}" placeholder="可补充四个维度的共同判断依据">${h(answer.note || "")}</textarea></label>
+        <div class="panel-heading"><div><strong>分维度 ELO 判断</strong><small>${acceptanceOnly ? "已通过 Mapping 显示左右模型来源。" : "候选身份保持隐藏；每个维度均可选择平局。"}</small></div><span class="mono">${h(match.match_id)}</span></div>
+        <div class="elo-dimension-list">${ELO_DIMENSIONS.map((dimension) => { const outcome = answer.dimension_results[dimension.key]; return `<div class="elo-dimension-row" data-dimension="${h(dimension.key)}"><strong>${h(dimension.label)}</strong><div class="elo-outcomes" role="group" aria-label="${h(dimension.label)}胜平负"><button class="${outcome === "left" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="left" aria-pressed="${outcome === "left"}" ${acceptanceOnly ? "disabled" : ""}>A 胜</button><button class="${outcome === "draw" ? "is-selected is-draw" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="draw" aria-pressed="${outcome === "draw"}" ${acceptanceOnly ? "disabled" : ""}>平局</button><button class="${outcome === "right" ? "is-selected" : ""}" data-action="set-elo-outcome" data-match="${h(match.match_id)}" data-dimension="${h(dimension.key)}" data-outcome="right" aria-pressed="${outcome === "right"}" ${acceptanceOnly ? "disabled" : ""}>B 胜</button></div></div>`; }).join("")}</div>
+        ${acceptanceOnly && !String(answer.note || "").trim() ? "" : `<label class="dimension-note-field elo-note"><span>本场共用备注${acceptanceOnly ? "" : " · 选填"}</span><textarea rows="2" data-role="elo-note" data-match="${h(match.match_id)}" placeholder="可补充四个维度的共同判断依据" ${acceptanceOnly ? "readonly" : ""}>${h(answer.note || "")}</textarea></label>`}
       </section>
     </section>`;
   }
@@ -1584,6 +1695,11 @@
   function renderActionBar() {
     const p = progress();
     const isLast = state.currentIndex === state.task.totalSubtaskCount - 1;
+    if (acceptanceOnly) return `<footer class="action-bar acceptance-action-bar">
+      <button type="button" class="button secondary" data-action="previous" ${state.currentIndex === 0 ? "disabled" : ""}>${icon("arrowLeft", 16)} 上一项</button>
+      <span class="autosave-state">${icon("eye", 14)} 只读验收 · 不会修改或导出结果</span>
+      <div class="action-bar-actions"><button type="button" class="button secondary" data-action="next" ${isLast ? "disabled" : ""}>下一项 ${icon("arrowRight", 16)}</button><button type="button" class="button primary" data-action="change-order">导入下一条 ${icon("paste", 15)}</button></div>
+    </footer>`;
     const qualityMode = state.workMode === "quality" || state.loadedHistory;
     const rightActions = qualityMode
       ? `<div class="action-bar-actions"><button type="button" class="button secondary" data-action="next" ${isLast ? "disabled" : ""}>下一项 ${icon("arrowRight", 16)}</button><button type="button" class="button primary" data-action="show-result" ${p.total === state.task.totalSubtaskCount ? "" : "disabled"}>${icon("download", 16)} 导出结果</button></div>`
@@ -1601,12 +1717,12 @@
     const task = state.task;
     const history = state.sourceAnnotation || {};
     const taskSurface = state.currentIndex < task.modelCount ? renderMosTask(state.currentIndex) : renderEloTask(state.currentIndex - task.modelCount);
-    root.innerHTML = `<div class="review-shell">
-      ${renderTopbar(`${renderAutoPlayToggle()}<button class="button ghost compact" data-action="change-order">${icon("paste", 15)} 更换工单</button>`)}
+    root.innerHTML = `<div class="review-shell ${acceptanceOnly ? "acceptance-shell acceptance-readonly" : ""}">
+      ${renderTopbar(`${renderAutoPlayToggle()}<button class="button ghost compact" data-action="change-order">${icon("paste", 15)} ${acceptanceOnly ? "导入下一条" : "更换工单"}</button>`)}
       <main class="review-workspace">
         <section class="workspace-header">
           <div class="case-header"><div><span class="eyebrow">${h(task.taskBundleId)}</span><h1>${h(task.caseId)}</h1></div><div class="case-meta"><span>${task.modelCount} 模型 · ${task.totalSubtaskCount} 子任务</span><span>${h(task.batchId)}</span><span class="mono">FP ${h(task.fingerprint)}</span></div></div>
-          ${state.loadedHistory ? renderQualityAudit(history) : ""}
+          ${state.loadedHistory && !acceptanceOnly ? renderQualityAudit(history) : ""}
           ${state.restoredDraft ? `<div class="history-banner draft-mode">${icon("refresh", 18)}<div><strong>已恢复本地草稿</strong><span>继续上次未完成的位置；最终仍需复制结果回工单。</span></div></div>` : ""}
           ${renderProgressBand()}
         </section>
@@ -1898,7 +2014,9 @@
   }
 
   root.addEventListener("input", (event) => {
+    if (event.target.id === "acceptance-mapping-input") state.mappingText = event.target.value;
     if (event.target.id === "work-order-input") state.pasteText = event.target.value;
+    if (acceptanceOnly) return;
     if (event.target.dataset.role === "mos-note") {
       state.mos[event.target.dataset.id].notes[event.target.dataset.dimension] = event.target.value;
       invalidateExportResult();
@@ -1919,6 +2037,18 @@
       scheduleDraftSave();
       refreshQualityAuditRegion();
     }
+  });
+
+  root.addEventListener("change", (event) => {
+    if (!acceptanceOnly || event.target.id !== "acceptance-mapping-file" || !event.target.files || !event.target.files[0]) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.mappingText = String(reader.result || "");
+      state.errors = [];
+      render();
+    };
+    reader.onerror = () => toast("无法读取 Mapping 文件", "error");
+    reader.readAsText(event.target.files[0]);
   });
 
   root.addEventListener("play", (event) => {
@@ -1977,6 +2107,15 @@
       return;
     }
     if (action === "parse-input") {
+      if (acceptanceOnly) {
+        try {
+          state.mapping = parseAcceptanceMapping(state.mappingText);
+          window.localStorage.setItem(ACCEPTANCE_MAPPING_KEY, state.mappingText);
+        } catch (error) {
+          state.errors = [error.message || String(error)];
+          return render();
+        }
+      }
       const parsed = state.importMode === "quality" ? parseResultJson(state.pasteText) : parseWorkOrder(state.pasteText, state.selectedModelCount);
       state.errors = parsed.errors || [];
       if (state.errors.length) return render();
@@ -1985,9 +2124,9 @@
       return loadTask(parsed.task, parsed.annotation, { workMode: state.importMode, skipDraft: true });
     }
     if (action === "change-order") {
-      if (state.task && progress().total > 0 && !window.confirm("当前进度已自动保存在本机。确定返回并粘贴另一条工单吗？")) return;
+      if (!acceptanceOnly && state.task && progress().total > 0 && !window.confirm("当前进度已自动保存在本机。确定返回并粘贴另一条工单吗？")) return;
       state.screen = "import";
-      state.importMode = state.workMode === "quality" ? "quality" : "annotate";
+      state.importMode = acceptanceOnly || state.workMode === "quality" ? "quality" : "annotate";
       state.errors = [];
       state.pasteText = "";
       return render();
@@ -1996,6 +2135,7 @@
       return U.copyText(target.dataset.id).then(() => toast("匿名 ID 已复制", "success")).catch(() => toast("复制失败，请手动选择", "error"));
     }
     if (action === "set-score") {
+      if (acceptanceOnly) return;
       clearMissingHighlights();
       const score = Number(target.dataset.score);
       const answer = state.mos[target.dataset.id];
@@ -2005,6 +2145,7 @@
       return refreshMosDimension(target.closest(".dimension-block"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-issue") {
+      if (acceptanceOnly) return;
       clearMissingHighlights();
       const answer = state.mos[target.dataset.id];
       const selected = answer.low_score_issues[target.dataset.dimension] || [];
@@ -2016,6 +2157,7 @@
       return refreshIssuePanel(target.closest(".issue-panel"), target.dataset.id, target.dataset.dimension);
     }
     if (action === "toggle-deduction") {
+      if (acceptanceOnly) return;
       clearMissingHighlights();
       const answer = state.mos[target.dataset.id];
       answer.instruction_deductions = answer.instruction_deductions.includes(target.dataset.issue)
@@ -2029,6 +2171,7 @@
       return;
     }
     if (action === "set-elo-outcome") {
+      if (acceptanceOnly) return;
       if (!["left", "draw", "right"].includes(target.dataset.outcome) || !ELO_DIMENSIONS.some((dimension) => dimension.key === target.dataset.dimension)) {
         return toast("无法识别这一维度的 ELO 结果", "error");
       }
