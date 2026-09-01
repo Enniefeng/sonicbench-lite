@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 const assert = require("assert");
+const fs = require("fs");
 global.window = global;
 require("./shared-data.js");
 const Core = require("./acceptance-viewer-core.js");
@@ -27,4 +28,5 @@ assert.deepStrictEqual(sparseView.mos[0].low_score_issues, {});
 assert.strictEqual(sparseView.mos[0].instruction_note, "");
 assert.strictEqual(sparseView.elo[0].note, "");
 assert.throws(() => Core.buildView(mapping, JSON.stringify([result, result])), /一次只载入一个/);
+assert.match(fs.readFileSync("acceptance-viewer-overrides.css", "utf8"), /\.result-view\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
 console.log("Acceptance viewer format and privacy regression passed.");

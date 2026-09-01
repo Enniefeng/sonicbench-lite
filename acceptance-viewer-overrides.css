@@ -1,3 +1,7 @@
+.result-view[hidden] {
+  display: none !important;
+}
+
 .hero h1 {
   margin-top: 0;
 }
