@@ -180,6 +180,21 @@ function testReviewer(line, modelCount) {
   assert.strictEqual(annotation.total_subtask_count, parsed.task.totalSubtaskCount);
   assert.deepStrictEqual(Array.from(api.validateAnnotation(annotation, parsed.task)), []);
 
+  const otherWithoutNote = JSON.parse(JSON.stringify(annotation));
+  otherWithoutNote.mos[0].scores.melody = 3;
+  otherWithoutNote.mos[0].low_score_issues.melody = ["其他"];
+  delete otherWithoutNote.mos[0].notes.melody;
+  assert.deepStrictEqual(
+    Array.from(api.validateAnnotation(otherWithoutNote, parsed.task)),
+    [],
+    "历史 JSON 选择其他但未填写维度备注时仍应正常载入"
+  );
+  assert.deepStrictEqual(
+    Array.from(api.parseResultJson(JSON.stringify(otherWithoutNote)).errors),
+    [],
+    "自包含 JSON 选择其他但未填写维度备注时仍应正常载入"
+  );
+
   const contextless = JSON.parse(JSON.stringify(annotation));
   delete contextless.work_order.tag;
   delete contextless.work_order.lyrics;
@@ -281,8 +296,7 @@ function testReviewer(line, modelCount) {
   api.state.mos[firstCandidateId].scores.melody = 3;
   assert.deepStrictEqual(Array.from(api.currentMissingItems().map((item) => item.label)), ["旋律：请选择低分问题"]);
   api.state.mos[firstCandidateId].low_score_issues.melody = ["其他"];
-  assert.deepStrictEqual(Array.from(api.currentMissingItems().map((item) => item.label)), ["旋律：请补充“其他”问题备注"]);
-  api.state.mos[firstCandidateId].notes.melody = "旋律存在其他问题";
+  assert.deepStrictEqual(Array.from(api.currentMissingItems().map((item) => item.label)), [], "选择其他后不应强制填写备注");
   api.state.mos[firstCandidateId].scores.instruction_following = 4;
   assert(api.currentMissingItems().some((item) => item.label.includes("请选择未遵循项")));
   api.state.mos[firstCandidateId].instruction_deductions = ["曲风未遵循"];

@@ -530,9 +530,6 @@
           if (item.scores[dimension.key] <= 3) {
             const selected = Array.isArray(issues[dimension.key]) ? issues[dimension.key] : [];
             if (!selected.length) errors.push(`${subtaskId} 的「${dimension.label}」低分时至少选择一个问题`);
-            if (selected.includes("其他") && !String(notes[dimension.key] || "").trim()) {
-              errors.push(`${subtaskId} 的「${dimension.label}」选择“其他”后必须补充备注`);
-            }
           }
         });
         GROUP_OVERALL_DIMENSIONS.forEach((dimension) => {
@@ -718,7 +715,7 @@
 
   function acceptanceValidationErrors(annotation, task) {
     return validateAnnotation(annotation, task).filter((message) => !(
-      /低分时至少选择一个问题|选择“其他”后必须补充备注|低分时必须备注|总评整体分必须备注|指令遵循扣分时至少选择一个扣分问题|指令遵循扣分后必须备注原因/.test(message)
+      /低分时至少选择一个问题|低分时必须备注|总评整体分必须备注|指令遵循扣分时至少选择一个扣分问题|指令遵循扣分后必须备注原因/.test(message)
       || /^revision_history/.test(message)
     ));
   }
@@ -921,7 +918,7 @@
     if (SUBDIMENSIONS.some((dimension) => {
       if (answer.scores[dimension.key] > 3) return false;
       const selected = answer.low_score_issues[dimension.key] || [];
-      return !selected.length || (selected.includes("其他") && !String(answer.notes[dimension.key] || "").trim());
+      return !selected.length;
     })) return false;
     if (GROUP_OVERALL_DIMENSIONS.some((dimension) => answer.scores[dimension.key] <= 3 && !String(answer.notes[dimension.key] || "").trim())) return false;
     if (!String(answer.notes[TOTAL_DIMENSION.key] || "").trim()) return false;
@@ -942,7 +939,6 @@
       if (!Number.isInteger(answer.scores[dimension.key]) || answer.scores[dimension.key] > 3) return;
       const selected = answer.low_score_issues[dimension.key] || [];
       if (!selected.length) missing += 1;
-      else if (selected.includes("其他") && !String(answer.notes[dimension.key] || "").trim()) missing += 1;
     });
     GROUP_OVERALL_DIMENSIONS.forEach((dimension) => {
       if (Number.isInteger(answer.scores[dimension.key]) && answer.scores[dimension.key] <= 3 && !String(answer.notes[dimension.key] || "").trim()) missing += 1;
@@ -988,12 +984,6 @@
           key: `issues:${dimension.key}`,
           label: `${dimension.label}：请选择低分问题`,
           selector: `.dimension-block[data-dimension="${dimension.key}"] .issue-panel`
-        });
-      } else if (selected.includes("其他") && !String(answer.notes[dimension.key] || "").trim()) {
-        items.push({
-          key: `other-note:${dimension.key}`,
-          label: `${dimension.label}：请补充“其他”问题备注`,
-          selector: `textarea[data-role="mos-note"][data-dimension="${dimension.key}"]`
         });
       }
     });
@@ -1670,10 +1660,10 @@
     const selected = answer.low_score_issues[dimension.key] || [];
     if (acceptanceOnly) {
       if (!selected.length) return "";
-      return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>已记录 ${selected.length} 项</small></div></div><div class="issue-chips">${selected.map((option) => `<span class="issue-chip is-selected">${icon("check", 11)}<span>${h(option)}</span></span>`).join("")}</div>${selected.includes("其他") ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "“其他”问题补充", false) : ""}</div>`;
+      return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>已记录 ${selected.length} 项</small></div></div><div class="issue-chips">${selected.map((option) => `<span class="issue-chip is-selected">${icon("check", 11)}<span>${h(option)}</span></span>`).join("")}</div>${String(answer.notes[dimension.key] || "").trim() ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "维度备注（选填）", false) : ""}</div>`;
     }
     const options = LOW_SCORE_OPTIONS[dimension.key] || ["其他"];
-    return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>必填 · 可多选</small></div><span>评分 ≤ 3</span></div><div class="issue-chips">${options.map((option) => `<button type="button" class="issue-chip ${selected.includes(option) ? "is-selected" : ""}" data-action="toggle-issue" data-id="${h(candidateId)}" data-dimension="${h(dimension.key)}" data-issue="${h(option)}" aria-pressed="${selected.includes(option)}">${selected.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div>${selected.includes("其他") ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "“其他”问题补充", true) : ""}</div>`;
+    return `<div class="issue-panel"><div class="issue-heading"><div><strong>低分问题</strong><small>必填 · 可多选</small></div><span>评分 ≤ 3</span></div><div class="issue-chips">${options.map((option) => `<button type="button" class="issue-chip ${selected.includes(option) ? "is-selected" : ""}" data-action="toggle-issue" data-id="${h(candidateId)}" data-dimension="${h(dimension.key)}" data-issue="${h(option)}" aria-pressed="${selected.includes(option)}">${selected.includes(option) ? icon("check", 11) : ""}<span>${h(option)}</span></button>`).join("")}</div>${selected.includes("其他") || String(answer.notes[dimension.key] || "").trim() ? renderNote(candidateId, dimension.key, answer.notes[dimension.key], "维度备注（选填）", false) : ""}</div>`;
   }
 
   function renderDimension(candidateId, dimension, answer, config) {
